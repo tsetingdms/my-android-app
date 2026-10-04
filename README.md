@@ -54,6 +54,10 @@ warning). Anyone has that key, so set up your own once:
 4. Back up `lumo-release.jks` and the password somewhere safe, **not** in this repo. Without them you can't publish
    updates that install over the existing app.
 
+Official release signing certificate (SHA-256), shown in every release's notes since v1.0.3:
+`8deba2c59d8cd10389b506503c852ea441d68e8d30036fbd4a1ce44679d15b04`. An APK signed with any other certificate
+did not come from this repo's release workflow.
+
 Switching from the debug key to your key changes the app's signature, so uninstall the old Lumo once before installing
 the first release-signed APK (your launcher layout resets).
 

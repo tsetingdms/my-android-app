@@ -89,6 +89,9 @@ node scripts/generate-icons.mjs assets   # regenerate app icon PNGs
   `SIGNING_KEY_PASSWORD`, default = store password), falling back to the debug key with a warning. Publishes
   GitHub Release `v1.0.<run_number>` (latest) with cert fingerprint + `SHA256SUMS.txt`.
 
+Release-key certificate SHA-256 (since v1.0.3): `8deba2c59d8cd10389b506503c852ea441d68e8d30036fbd4a1ce44679d15b04`.
+If a release's notes say "debug" or show another fingerprint, the signing secrets are missing or were changed.
+
 All third-party actions are pinned to commit SHAs (tag in a comment); update both together. setup-gradle uses
 `cache-provider: basic` (open-source cache). Stable download links:
 https://github.com/tsetingdms/my-android-app/releases/latest/download/lumo-launcher.apk and `…/lumo-launcher-arm64.apk`
