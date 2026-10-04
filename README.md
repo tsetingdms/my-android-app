@@ -8,6 +8,10 @@ built with Expo (React Native) + TypeScript and a small native Kotlin module.
 
 ## Features
 
+**New in 1.1:** control panel, edge panel, Lumo lock screen, 11 clock styles with custom fonts, one-tap themes with
+picture wallpapers and real frosted-glass blur, your own photo as wallpaper, drawer Grid/Pages/List layouts with A–Z
+quick scroll, and drag-down-anywhere to close the drawer.
+
 - **Liquid-glass look** – see-through panels with a light shine and bright edges, built without expensive blur so it stays smooth on
   low-end phones. Styles: Liquid, Frosted, Clear, Solid.
 - **Home screen** – clock (Thin / Bold / Stacked / Card), battery and date glass cards, pinned apps, glass dock and search bar.
@@ -19,9 +23,14 @@ built with Expo (React Native) + TypeScript and a small native Kotlin module.
   glass shine, and accent-tinted themed icons (works on Android 11 too).
 - **Customise** (long-press empty home space) – dark/light/auto theme, accent colours or wallpaper-matched accent,
   your phone wallpaper or built-in gradients, wallpaper dimming, hide apps, reorder home/dock.
-- Swipe down on home to open notifications; long-press any app for add/remove/move/hide/info/uninstall.
+- **Control panel** (swipe down on home) – tiles that tilt toward your finger, brightness & volume pills, music
+  controls, torch, sound/vibrate, auto-rotate, Wi‑Fi/data/Bluetooth/location/airplane shortcuts, notifications.
+- **Edge panel** – swipe the small bar on the right edge: tools and favourite apps while the home screen tilts back.
+- **Lock screen** (optional) – your clock style over the phone's lock with torch & camera; swipe up to unlock (your
+  PIN/fingerprint still protects the phone).
+- Long-press any app for add/remove/move/hide/info/uninstall and add to dock or edge panel.
 - Everything is stored on the phone. No account, no internet permission in release builds, and no cloud backup of
-  your data.
+  your data. Brightness/auto-rotate control asks for "Modify system settings" only if you use it.
 
 ## Build
 

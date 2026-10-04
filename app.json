@@ -2,7 +2,7 @@
   "expo": {
     "name": "Lumo Launcher",
     "slug": "lumo-launcher",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -11,7 +11,7 @@
     },
     "android": {
       "package": "com.tsetingdms.lumolauncher",
-      "versionCode": 1,
+      "versionCode": 2,
       "adaptiveIcon": {
         "backgroundColor": "#3A238F",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -27,7 +27,23 @@
       "allowBackup": false
     },
     "plugins": [
-      "./plugins/withLauncher"
+      "./plugins/withLauncher",
+      [
+        "expo-font",
+        {
+          "android": {
+            "fonts": [
+              "./assets/fonts/BebasNeue.ttf",
+              "./assets/fonts/Anton.ttf",
+              "./assets/fonts/Fredoka.ttf",
+              "./assets/fonts/Orbitron.ttf",
+              "./assets/fonts/BigShouldersStencil.ttf",
+              "./assets/fonts/Unbounded.ttf",
+              "./assets/fonts/Righteous.ttf"
+            ]
+          }
+        }
+      ]
     ]
   }
 }

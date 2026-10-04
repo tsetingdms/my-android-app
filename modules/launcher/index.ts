@@ -50,6 +50,7 @@ export type SettingsPanel =
   | 'battery'
   | 'storage'
   | 'location'
+  | 'airplane'
   | 'apps'
   | 'settings';
 

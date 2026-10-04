@@ -24,7 +24,7 @@ export function GlanceRow() {
 
   return (
     <View style={styles.row}>
-      <GlassButton style={styles.card} radius={24} onPress={() => Launcher.openSettingsPanel('battery')}>
+      <GlassButton style={styles.card} radius={24} frosted onPress={() => Launcher.openSettingsPanel('battery')}>
         <View style={styles.inner}>
           <View style={styles.header}>
             <Ionicons name={batteryIcon(level, battery.charging)} size={18} color={barColor} />
@@ -42,7 +42,7 @@ export function GlanceRow() {
         </View>
       </GlassButton>
 
-      <GlassButton style={styles.card} radius={24} onPress={Launcher.openCalendar}>
+      <GlassButton style={styles.card} radius={24} frosted onPress={Launcher.openCalendar}>
         <View style={styles.inner}>
           <View style={styles.header}>
             <Ionicons name="calendar-outline" size={16} color={palette.accent} />

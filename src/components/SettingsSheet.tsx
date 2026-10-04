@@ -1,21 +1,45 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useState, type ReactNode } from 'react';
-import { AppState, Image, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  AppState,
+  Image,
+  Modal,
+  PixelRatio,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import * as Launcher from '../../modules/launcher';
+import { useMinuteClock } from '../hooks';
+import type { App } from '../store';
 import { useStore } from '../store';
 import {
   ACCENTS,
+  CLOCK_COLORS,
+  CLOCK_FACES,
   GRADIENTS,
   SHAPES,
   shapeStyle,
-  type ClockStyle,
+  THEMES,
+  WALLPAPER_IMAGES,
+  wallpaperImage,
+  type ClockFace as Face,
+  type DrawerStyle,
+  type EdgeHandle,
   type GlassStyle,
   type Settings,
+  type SwipeDownAction,
   type ThemeMode,
+  type ThemePreset,
 } from '../theme';
+import { ClockFace, resolveClockColor } from './ClockFace';
 import { Glass, GlassButton } from './Glass';
 
 type Props = { visible: boolean; onClose: () => void };
@@ -23,7 +47,11 @@ type Props = { visible: boolean; onClose: () => void };
 export function SettingsSheet({ visible, onClose }: Props) {
   const { settings, updateSettings, resetSettings, palette, layout, updateLayout, appsByKey, refreshApps } = useStore();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const now = useMinuteClock();
   const [isDefault, setIsDefault] = useState(true);
+  const [clockTarget, setClockTarget] = useState<'home' | 'lock'>('home');
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -35,7 +63,24 @@ export function SettingsSheet({ visible, onClose }: Props) {
   }, [visible]);
 
   const set = <K extends keyof Settings>(key: K) => (value: Settings[K]) => updateSettings({ [key]: value } as Partial<Settings>);
-  const hiddenApps = layout.hidden.map((k) => appsByKey.get(k)).filter((a) => !!a);
+  const setWallpaper = (wallpaper: string) => updateSettings({ wallpaper, themeId: null });
+  const hiddenApps = layout.hidden.map((k) => appsByKey.get(k)).filter((a): a is App => !!a);
+  const previewApps = [...layout.home, ...layout.dock].map((k) => appsByKey.get(k)).filter((a): a is App => !!a);
+  const contentWidth = width - 32 - 32;
+  const pictureWallpaper = wallpaperImage(settings) != null;
+
+  const pickPhoto = async () => {
+    setPhotoError(null);
+    try {
+      const uri = await Launcher.pickWallpaperPhoto(Math.round(PixelRatio.getPixelSizeForLayoutSize(width)));
+      if (uri) updateSettings({ wallpaper: 'photo', photoUri: uri, themeId: null });
+    } catch (e) {
+      setPhotoError(e instanceof Error ? e.message : "Couldn't open your photos");
+    }
+  };
+
+  const faceKey = clockTarget === 'home' ? settings.clockStyle : settings.lockFace;
+  const colorKey = clockTarget === 'home' ? settings.clockColor : settings.lockColor;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
@@ -65,6 +110,24 @@ export function SettingsSheet({ visible, onClose }: Props) {
             </GlassButton>
           )}
 
+          <Section title="Themes" icon="color-palette-outline">
+            <Text style={[styles.hint, { marginBottom: 10, color: palette.subtext }]}>
+              One tap sets the wallpaper, colors, glass, icons and clocks.
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.themes}>
+              {THEMES.map((t) => (
+                <ThemeCard
+                  key={t.id}
+                  preset={t}
+                  apps={previewApps}
+                  now={now}
+                  selected={settings.themeId === t.id}
+                  onPress={() => updateSettings({ ...t.patch, themeId: t.id })}
+                />
+              ))}
+            </ScrollView>
+          </Section>
+
           <Section title="Look & feel" icon="sparkles-outline">
             <Label text="Theme" />
             <Choice<ThemeMode>
@@ -91,7 +154,7 @@ export function SettingsSheet({ visible, onClose }: Props) {
             <View style={styles.swatches}>
               <Pressable
                 onPress={() => updateSettings({ accent: 'wallpaper' })}
-                style={[styles.swatch, styles.autoSwatch, { borderColor: settings.accent === 'wallpaper' ? palette.text : 'transparent' }]}
+                style={[styles.swatch, styles.center, { borderColor: settings.accent === 'wallpaper' ? palette.text : 'transparent' }]}
               >
                 <Ionicons name="image-outline" size={16} color={palette.text} />
               </Pressable>
@@ -109,22 +172,62 @@ export function SettingsSheet({ visible, onClose }: Props) {
 
           <Section title="Wallpaper" icon="image-outline">
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.walls}>
-              <WallTile
-                selected={settings.wallpaper === 'system'}
-                name="Phone"
-                onPress={() => updateSettings({ wallpaper: 'system' })}
-              >
+              <WallTile selected={settings.wallpaper === 'system'} name="Phone" onPress={() => setWallpaper('system')}>
                 <View style={[styles.wallFill, styles.center, { backgroundColor: palette.chipBg }]}>
                   <Ionicons name="phone-portrait-outline" size={22} color={palette.text} />
                 </View>
               </WallTile>
+              <WallTile selected={settings.wallpaper === 'photo'} name="My photo" onPress={pickPhoto}>
+                {settings.photoUri ? (
+                  <Image source={{ uri: settings.photoUri }} style={styles.wallFill} resizeMode="cover" resizeMethod="resize" />
+                ) : (
+                  <View style={[styles.wallFill, styles.center, { backgroundColor: palette.chipBg }]}>
+                    <Ionicons name="images-outline" size={22} color={palette.text} />
+                  </View>
+                )}
+              </WallTile>
+              {Object.entries(WALLPAPER_IMAGES).map(([key, w]) => (
+                <WallTile key={key} selected={settings.wallpaper === `img:${key}`} name={w.name} onPress={() => setWallpaper(`img:${key}`)}>
+                  <Image source={w.source} style={styles.wallFill} resizeMode="cover" resizeMethod="resize" />
+                </WallTile>
+              ))}
               {Object.entries(GRADIENTS).map(([key, g]) => (
-                <WallTile key={key} selected={settings.wallpaper === key} name={g.name} onPress={() => updateSettings({ wallpaper: key })}>
+                <WallTile key={key} selected={settings.wallpaper === key} name={g.name} onPress={() => setWallpaper(key)}>
                   <LinearGradient colors={g.colors} start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }} style={styles.wallFill} />
                 </WallTile>
               ))}
             </ScrollView>
-            <Row label="Change phone wallpaper" onPress={Launcher.openWallpaperPicker} chevron />
+            {photoError ? <Text style={[styles.hint, { color: '#FF453A' }]}>{photoError}</Text> : null}
+            {settings.wallpaper === 'photo' && (
+              <Row label="Choose another photo" onPress={pickPhoto} chevron />
+            )}
+            {settings.wallpaper === 'system' && (
+              <Row label="Change phone wallpaper" onPress={Launcher.openWallpaperPicker} chevron />
+            )}
+            {pictureWallpaper && (
+              <>
+                <Label text="Blur wallpaper" />
+                <Choice<number>
+                  value={settings.wallpaperBlur}
+                  onChange={set('wallpaperBlur')}
+                  options={[
+                    { value: 0, label: 'Off' },
+                    { value: 6, label: 'Soft' },
+                    { value: 14, label: 'Strong' },
+                  ]}
+                />
+              </>
+            )}
+            <Toggle
+              label="Frosted glass"
+              hint={
+                pictureWallpaper
+                  ? 'Blurs the wallpaper behind the drawer, panels, dock and cards'
+                  : 'Works with picture wallpapers (themes or your photo)'
+              }
+              value={settings.panelBlur}
+              onChange={set('panelBlur')}
+            />
             <Label text="Dim wallpaper" />
             <Choice<number>
               value={settings.dim}
@@ -136,6 +239,98 @@ export function SettingsSheet({ visible, onClose }: Props) {
                 { value: 0.45, label: 'High' },
               ]}
             />
+          </Section>
+
+          <Section title="Clock" icon="time-outline">
+            <Choice<'home' | 'lock'>
+              value={clockTarget}
+              onChange={setClockTarget}
+              options={[
+                { value: 'home', label: 'Home screen' },
+                { value: 'lock', label: 'Lock screen' },
+              ]}
+            />
+            <View style={styles.faces}>
+              {CLOCK_FACES.filter((f) => clockTarget === 'home' || f.key !== 'minimal').map((f) => (
+                <ClockTile
+                  key={f.key}
+                  face={f.key}
+                  name={f.name}
+                  width={(contentWidth - 10) / 2}
+                  now={now}
+                  color={colorKey}
+                  selected={faceKey === f.key}
+                  onPress={() => updateSettings(clockTarget === 'home' ? { clockStyle: f.key } : { lockFace: f.key })}
+                />
+              ))}
+            </View>
+            <Label text="Clock color" />
+            <View style={styles.swatches}>
+              {CLOCK_COLORS.map((c) => {
+                const selected = colorKey === c;
+                const update = () => updateSettings(clockTarget === 'home' ? { clockColor: c } : { lockColor: c });
+                return (
+                  <Pressable key={c} onPress={update} style={[styles.swatch, styles.center, { borderColor: selected ? palette.text : 'transparent' }]}>
+                    {c === 'auto' ? (
+                      <Text style={[styles.swatchText, { color: palette.text }]}>A</Text>
+                    ) : (
+                      <View style={[styles.swatchFill, styles.swatchBorder, { backgroundColor: c === 'accent' ? palette.accent : c }]} />
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Toggle label="24-hour time" value={settings.clock24h} onChange={set('clock24h')} />
+            {clockTarget === 'home' && <Toggle label="Show clock on home" value={settings.showClock} onChange={set('showClock')} />}
+          </Section>
+
+          <Section title="Lock screen" icon="lock-closed-outline">
+            <Toggle
+              label="Lumo lock screen"
+              hint="Your clock style over the phone's lock. Swipe up to unlock — your PIN or fingerprint still protects the phone."
+              value={settings.lockEnabled}
+              onChange={set('lockEnabled')}
+            />
+            {settings.lockEnabled && !isDefault && (
+              <Text style={[styles.hint, { color: '#FF9F0A' }]}>Needs Lumo as your default home app to appear.</Text>
+            )}
+            <Toggle label="Torch & camera buttons" value={settings.lockShortcuts} onChange={set('lockShortcuts')} />
+            <Row label="Lock screen clock style" detail={CLOCK_FACES.find((f) => f.key === settings.lockFace)?.name} onPress={() => setClockTarget('lock')} chevron />
+          </Section>
+
+          <Section title="Gestures & panels" icon="hand-left-outline">
+            <Label text="Swipe down on home" />
+            <Choice<SwipeDownAction>
+              value={settings.swipeDown}
+              onChange={set('swipeDown')}
+              options={[
+                { value: 'controls', label: 'Controls' },
+                { value: 'split', label: 'Split' },
+                { value: 'notifications', label: 'Alerts' },
+              ]}
+            />
+            <Text style={[styles.hint, { color: palette.subtext }]}>
+              {settings.swipeDown === 'split'
+                ? 'Left half opens notifications, right half opens the control panel.'
+                : settings.swipeDown === 'controls'
+                  ? 'Opens the Lumo control panel (it has a Notifications button too).'
+                  : 'Opens the phone’s notification shade.'}
+            </Text>
+            <Toggle label="Edge panel" hint="Swipe the little bar on the right edge" value={settings.edgePanel} onChange={set('edgePanel')} />
+            {settings.edgePanel && (
+              <>
+                <Label text="Edge bar position" />
+                <Choice<EdgeHandle>
+                  value={settings.edgeHandle}
+                  onChange={set('edgeHandle')}
+                  options={[
+                    { value: 'upper', label: 'Upper' },
+                    { value: 'middle', label: 'Middle' },
+                    { value: 'lower', label: 'Lower' },
+                  ]}
+                />
+              </>
+            )}
           </Section>
 
           <Section title="Icons" icon="shapes-outline">
@@ -178,41 +373,35 @@ export function SettingsSheet({ visible, onClose }: Props) {
             />
             <Toggle label="App names" value={settings.showLabels} onChange={set('showLabels')} />
             <Toggle label="Glass shine on icons" value={settings.iconShine} onChange={set('iconShine')} />
-            <Toggle
-              label="Themed icons"
-              hint="Tints icons with your accent color"
-              value={settings.themedIcons}
-              onChange={set('themedIcons')}
-            />
+            <Toggle label="Themed icons" hint="Tints icons with your accent color" value={settings.themedIcons} onChange={set('themedIcons')} />
           </Section>
 
           <Section title="Home screen" icon="home-outline">
-            <Toggle label="Clock" value={settings.showClock} onChange={set('showClock')} />
-            {settings.showClock && (
-              <>
-                <Choice<ClockStyle>
-                  value={settings.clockStyle}
-                  onChange={set('clockStyle')}
-                  options={[
-                    { value: 'large', label: 'Thin' },
-                    { value: 'bold', label: 'Bold' },
-                    { value: 'stacked', label: 'Stacked' },
-                    { value: 'minimal', label: 'Card' },
-                  ]}
-                />
-                <Toggle label="24-hour time" value={settings.clock24h} onChange={set('clock24h')} />
-              </>
-            )}
             <Toggle label="Battery & date cards" value={settings.showGlance} onChange={set('showGlance')} />
             <Toggle label="Search bar" value={settings.showSearch} onChange={set('showSearch')} />
-            <Toggle
-              label="Swipe down for notifications"
-              value={settings.swipeDownNotifications}
-              onChange={set('swipeDownNotifications')}
-            />
           </Section>
 
           <Section title="App drawer" icon="grid-outline">
+            <Label text="Layout" />
+            <Choice<DrawerStyle>
+              value={settings.drawerStyle}
+              onChange={set('drawerStyle')}
+              options={[
+                { value: 'grid', label: 'Grid' },
+                { value: 'pages', label: 'Pages' },
+                { value: 'list', label: 'List' },
+              ]}
+            />
+            <Text style={[styles.hint, { color: palette.subtext }]}>
+              {settings.drawerStyle === 'pages'
+                ? 'Swipe sideways through pages of apps — no endless scrolling.'
+                : settings.drawerStyle === 'list'
+                  ? 'One app per row, alphabetical.'
+                  : 'Scrolling grid of icons.'}
+            </Text>
+            {settings.drawerStyle !== 'pages' && (
+              <Toggle label="A–Z quick scroll" hint="Letters on the right edge jump through your apps" value={settings.azScroller} onChange={set('azScroller')} />
+            )}
             <Toggle label="Category tabs" value={settings.drawerCategories} onChange={set('drawerCategories')} />
             <Toggle label="Frequently used row" value={settings.showFrequent} onChange={set('showFrequent')} />
           </Section>
@@ -244,10 +433,102 @@ export function SettingsSheet({ visible, onClose }: Props) {
             <Row label="Reset look to defaults" onPress={resetSettings} destructive />
           </Section>
 
-          <Text style={[styles.footer, { color: palette.subtext }]}>Lumo Launcher 1.0 · Everything stays on your phone</Text>
+          <Text style={[styles.footer, { color: palette.subtext }]}>Lumo Launcher · Everything stays on your phone</Text>
         </ScrollView>
       </View>
     </Modal>
+  );
+}
+
+function ThemeCard({
+  preset,
+  apps,
+  now,
+  selected,
+  onPress,
+}: {
+  preset: ThemePreset;
+  apps: App[];
+  now: Date;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const { palette } = useStore();
+  const p = preset.patch;
+  const image = p.wallpaper?.startsWith('img:') ? WALLPAPER_IMAGES[p.wallpaper.slice(4)]?.source : undefined;
+  const light = p.theme === 'light';
+  const clockColor =
+    !p.clockColor || p.clockColor === 'auto' ? (light ? '#111114' : '#FFFFFF') : p.clockColor === 'accent' ? p.accent ?? '#fff' : p.clockColor;
+  const icon = (app: App | undefined, i: number) => (
+    <View key={i} style={[styles.miniIcon, shapeStyle(p.iconShape ?? 'squircle', 15), { backgroundColor: 'rgba(255,255,255,0.75)' }]}>
+      {app?.icon ? <Image source={{ uri: app.icon }} style={styles.miniIconImage} fadeDuration={0} /> : null}
+    </View>
+  );
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.themeCard, pressed && { transform: [{ scale: 0.96 }] }]}>
+      <View style={[styles.phone, { borderColor: selected ? palette.accent : palette.separator }]}>
+        {image ? <Image source={image} style={StyleSheet.absoluteFill} resizeMode="cover" resizeMethod="resize" /> : null}
+        <View style={[styles.miniClock, p.clockStyle === 'giant' && styles.center]}>
+          <ClockFace face={p.clockStyle ?? 'large'} color={clockColor} accent={p.accent ?? palette.accent} now={now} use24h={false} scale={0.24} />
+        </View>
+        <View style={styles.miniGrid}>{Array.from({ length: 8 }, (_, i) => icon(apps[i], i))}</View>
+        <View style={styles.miniDock}>{Array.from({ length: 4 }, (_, i) => icon(apps[8 + i] ?? apps[i], i))}</View>
+        {selected && (
+          <View style={[styles.themeCheck, { backgroundColor: palette.accent }]}>
+            <Ionicons name="checkmark" size={12} color="#fff" />
+          </View>
+        )}
+      </View>
+      <Text style={[styles.themeName, { color: palette.text }]}>{preset.name}</Text>
+      <Text style={[styles.themeSub, { color: palette.subtext }]}>{preset.subtitle}</Text>
+    </Pressable>
+  );
+}
+
+function ClockTile({
+  face,
+  name,
+  width,
+  now,
+  color,
+  selected,
+  onPress,
+}: {
+  face: Face;
+  name: string;
+  width: number;
+  now: Date;
+  color: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const { palette, settings } = useStore();
+  const image = wallpaperImage(settings);
+  const gradient = GRADIENTS[settings.wallpaper];
+  const resolved = resolveClockColor(color, palette);
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [{ width }, pressed && { transform: [{ scale: 0.97 }] }]}>
+      <View style={[styles.faceTile, { borderColor: selected ? palette.accent : 'transparent' }]}>
+        {image ? (
+          <Image source={image} style={StyleSheet.absoluteFill} resizeMode="cover" resizeMethod="resize" />
+        ) : gradient ? (
+          <LinearGradient colors={gradient.colors} style={StyleSheet.absoluteFill} />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: palette.dark ? '#1B1B24' : '#D9DCE6' }]} />
+        )}
+        <View style={[styles.facePreview, face === 'giant' && styles.center]}>
+          {face === 'minimal' ? (
+            <View style={[styles.miniCard, { backgroundColor: palette.glassBg, borderColor: palette.glassBorder }]}>
+              <Text style={{ color: palette.text, fontSize: 9 }}>Good day</Text>
+              <Text style={{ color: palette.text, fontSize: 14 }}>10:08</Text>
+            </View>
+          ) : (
+            <ClockFace face={face} color={resolved} accent={palette.accent} now={now} use24h={settings.clock24h} scale={0.3} />
+          )}
+        </View>
+      </View>
+      <Text style={[styles.faceName, { color: selected ? palette.accent : palette.text }]}>{name}</Text>
+    </Pressable>
   );
 }
 
@@ -445,13 +726,81 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     padding: 3,
   },
-  autoSwatch: {
+  swatchFill: {
+    flex: 1,
+    alignSelf: 'stretch',
+    borderRadius: 14,
+  },
+  swatchBorder: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(128,128,128,0.6)',
+  },
+  swatchText: {
+    fontSize: 14,
+    fontFamily: 'sans-serif-medium',
+  },
+  themes: {
+    gap: 12,
+    paddingVertical: 2,
+  },
+  themeCard: {
+    width: 104,
+  },
+  phone: {
+    width: 104,
+    height: 200,
+    borderRadius: 18,
+    borderWidth: 2,
+    overflow: 'hidden',
+    padding: 6,
+  },
+  miniClock: {
+    marginTop: 8,
+    marginLeft: 2,
+  },
+  miniGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 'auto',
+    paddingHorizontal: 4,
+  },
+  miniDock: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 10,
+    marginBottom: 2,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.28)',
+  },
+  miniIcon: {
+    width: 15,
+    height: 15,
+    overflow: 'hidden',
+  },
+  miniIconImage: {
+    width: 15,
+    height: 15,
+  },
+  themeCheck: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  swatchFill: {
-    flex: 1,
-    borderRadius: 14,
+  themeName: {
+    fontSize: 13,
+    fontFamily: 'sans-serif-medium',
+    marginTop: 6,
+  },
+  themeSub: {
+    fontSize: 11,
   },
   walls: {
     gap: 10,
@@ -470,6 +819,7 @@ const styles = StyleSheet.create({
   wallFill: {
     flex: 1,
     borderRadius: 12,
+    overflow: 'hidden',
   },
   wallCheck: {
     position: 'absolute',
@@ -484,6 +834,34 @@ const styles = StyleSheet.create({
   wallName: {
     fontSize: 11,
     marginTop: 4,
+  },
+  faces: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 12,
+  },
+  faceTile: {
+    height: 116,
+    borderRadius: 18,
+    borderWidth: 2,
+    overflow: 'hidden',
+  },
+  facePreview: {
+    flex: 1,
+    padding: 10,
+    justifyContent: 'center',
+  },
+  faceName: {
+    fontSize: 12,
+    fontFamily: 'sans-serif-medium',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  miniCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 8,
   },
   choiceRow: {
     flexDirection: 'row',

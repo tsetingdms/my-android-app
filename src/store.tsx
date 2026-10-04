@@ -20,14 +20,16 @@ export type App = NativeApp;
 export type Layout = {
   home: string[];
   dock: string[];
+  /** Apps pinned to the edge panel (empty = show most used). */
+  edge: string[];
   hidden: string[];
   launches: Record<string, number>;
   seeded: boolean;
 };
 
-const DEFAULT_LAYOUT: Layout = { home: [], dock: [], hidden: [], launches: {}, seeded: false };
+const DEFAULT_LAYOUT: Layout = { home: [], dock: [], edge: [], hidden: [], launches: {}, seeded: false };
 
-const KEYS = {
+export const KEYS = {
   settings: 'lumo.settings.v1',
   layout: 'lumo.layout.v1',
   apps: 'lumo.apps.v1',
@@ -203,10 +205,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const valid = new Set(apps.map((a) => a.key));
       const home = current.home.filter((k) => valid.has(k));
       const dock = current.dock.filter((k) => valid.has(k));
-      if (home.length === current.home.length && dock.length === current.dock.length) return current;
-      return { ...current, home, dock };
+      const edge = current.edge.filter((k) => valid.has(k));
+      if (
+        home.length === current.home.length &&
+        dock.length === current.dock.length &&
+        edge.length === current.edge.length
+      ) {
+        return current;
+      }
+      return { ...current, home, dock, edge };
     });
   }, [ready, appsLoading, apps, settings.columns]);
+
+  // The lock screen is started natively on screen-off; keep its on/off switch in sync.
+  useEffect(() => {
+    if (ready) Launcher.setLockScreenEnabled(settings.lockEnabled);
+  }, [ready, settings.lockEnabled]);
 
   const appsByKey = useMemo(() => new Map(apps.map((a) => [a.key, a])), [apps]);
 

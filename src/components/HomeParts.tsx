@@ -26,7 +26,7 @@ export function HomeGrid({ look, onPress, onLongPress }: AppHandlers) {
 
   if (apps.length === 0) {
     return (
-      <Glass radius={20} style={styles.hint}>
+      <Glass radius={20} style={styles.hint} frosted>
         <Text style={[styles.hintText, { color: palette.subtext }]}>
           Swipe up for all apps. Long-press any app to add it here or to the dock.
         </Text>
@@ -67,7 +67,7 @@ export function Dock({ look, onPress, onLongPress }: AppHandlers) {
   const size = Math.min(settings.iconSize, cellWidth - 10);
 
   return (
-    <Glass radius={30} style={styles.dock}>
+    <Glass radius={30} style={styles.dock} frosted>
       {apps.length === 0 ? (
         <Text style={[styles.dockEmpty, { color: palette.subtext }]}>Long-press an app → Add to dock</Text>
       ) : (
@@ -95,13 +95,13 @@ export function SearchPill({ onPress, onOpenDrawer }: { onPress: () => void; onO
   const { palette } = useStore();
   return (
     <View style={styles.searchRow}>
-      <GlassButton radius={24} style={styles.searchPill} onPress={onPress}>
+      <GlassButton radius={24} style={styles.searchPill} onPress={onPress} frosted>
         <View style={styles.searchInner}>
           <Ionicons name="search" size={18} color={palette.subtext} />
           <Text style={[styles.searchText, { color: palette.subtext }]}>Search apps</Text>
         </View>
       </GlassButton>
-      <GlassButton radius={24} style={styles.appsButton} onPress={onOpenDrawer}>
+      <GlassButton radius={24} style={styles.appsButton} onPress={onOpenDrawer} frosted>
         <View style={styles.appsInner}>
           <Ionicons name="apps" size={18} color={palette.text} />
         </View>
@@ -126,7 +126,7 @@ export function DefaultLauncherBanner() {
 
   if (!show || dismissed) return null;
   return (
-    <GlassButton radius={20} style={styles.banner} onPress={Launcher.requestHomeRole}>
+    <GlassButton radius={20} style={styles.banner} onPress={Launcher.requestHomeRole} frosted>
       <View style={styles.bannerInner}>
         <Ionicons name="home-outline" size={20} color={palette.accent} />
         <Text style={[styles.bannerText, { color: palette.text }]}>Tap to set Lumo as your home screen</Text>

@@ -1,20 +1,40 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { StyleSheet, View } from 'react-native';
+import { createContext, useContext } from 'react';
+import { Image, StyleSheet, View } from 'react-native';
 
 import { useStore } from '../store';
-import { GRADIENTS } from '../theme';
+import { GRADIENTS, wallpaperImage } from '../theme';
+
+/** Blur (dp) used for frosted panels and glass cards over picture wallpapers. */
+export const BACKDROP_BLUR = 22;
+
+/** Size of the root view, so frosted cards can line their blurred copy up with the wallpaper. */
+export const ScreenSizeContext = createContext<{ width: number; height: number } | null>(null);
+export const useScreenSize = () => useContext(ScreenSizeContext);
 
 /**
- * Background layer. In "system" mode it stays transparent so the phone's own wallpaper
- * (drawn by Android behind the window) shows through; otherwise draws a gradient.
+ * Background layer. "Phone" mode stays transparent so Android draws the system wallpaper behind
+ * the window; otherwise it shows a gradient or a picture (theme art or the user's photo).
+ * Picture blur is computed once at decode time by the image pipeline, not every frame.
  */
 export function Wallpaper() {
   const { settings, palette } = useStore();
-  const gradient = GRADIENTS[settings.wallpaper];
+  const image = wallpaperImage(settings);
+  const gradient = image ? undefined : GRADIENTS[settings.wallpaper];
   const dim = settings.dim;
 
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      {image ? (
+        <Image
+          source={image}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+          resizeMethod="resize"
+          blurRadius={settings.wallpaperBlur > 0 ? settings.wallpaperBlur : undefined}
+          fadeDuration={0}
+        />
+      ) : null}
       {gradient && (
         <>
           <LinearGradient
@@ -46,6 +66,30 @@ export function Wallpaper() {
           ]}
         />
       )}
+    </View>
+  );
+}
+
+/**
+ * Full-screen frosted background for overlays (drawer, control panel, edge panel): the blurred
+ * wallpaper picture under a light tint, or a stronger plain tint for the phone wallpaper.
+ */
+export function PanelBackdrop({ blurTint, solidTint }: { blurTint: string; solidTint: string }) {
+  const { settings } = useStore();
+  const image = settings.panelBlur ? wallpaperImage(settings) : null;
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      {image ? (
+        <Image
+          source={image}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+          resizeMethod="resize"
+          blurRadius={BACKDROP_BLUR}
+          fadeDuration={0}
+        />
+      ) : null}
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: image ? blurTint : solidTint }]} />
     </View>
   );
 }

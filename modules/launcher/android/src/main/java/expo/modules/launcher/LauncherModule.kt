@@ -457,6 +457,7 @@ class LauncherModule : Module() {
       "battery" -> Intent.ACTION_POWER_USAGE_SUMMARY
       "storage" -> Settings.ACTION_INTERNAL_STORAGE_SETTINGS
       "location" -> Settings.ACTION_LOCATION_SOURCE_SETTINGS
+      "airplane" -> Settings.ACTION_AIRPLANE_MODE_SETTINGS
       "apps" -> Settings.ACTION_APPLICATION_SETTINGS
       else -> Settings.ACTION_SETTINGS
     }

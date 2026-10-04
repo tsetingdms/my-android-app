@@ -6,9 +6,10 @@ import * as Launcher from '../../modules/launcher';
 import type { App, Layout } from '../store';
 import { useStore } from '../store';
 import { Glass } from './Glass';
+import { EDGE_APP_LIMIT } from './EdgePanel';
 import { DOCK_LIMIT } from './HomeParts';
 
-export type ActionTarget = { app: App; source: 'home' | 'dock' | 'drawer' };
+export type ActionTarget = { app: App; source: 'home' | 'dock' | 'drawer' | 'edge' };
 
 type Action = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -38,8 +39,8 @@ export function ActionsSheet({ target, onClose }: { target: ActionTarget | null;
     const inDock = layout.dock.includes(key);
     const edit = (fn: (l: Layout) => Layout) => () => updateLayout(fn);
 
-    if (target.source === 'home' || target.source === 'dock') {
-      const list = target.source === 'home' ? 'home' : 'dock';
+    if (target.source === 'home' || target.source === 'dock' || target.source === 'edge') {
+      const list = target.source;
       const index = layout[list].indexOf(key);
       if (index > 0) {
         actions.push({ icon: 'chevron-back', label: 'Move left', run: edit((l) => ({ ...l, [list]: move(l[list], key, -1) })) });
@@ -61,6 +62,20 @@ export function ActionsSheet({ target, onClose }: { target: ActionTarget | null;
       actions.push({ icon: 'add-circle-outline', label: 'Add to dock', run: edit((l) => ({ ...l, dock: [...l.dock, key] })) });
     }
 
+    if (layout.edge.includes(key)) {
+      actions.push({
+        icon: 'remove-circle-outline',
+        label: 'Remove from edge panel',
+        run: edit((l) => ({ ...l, edge: l.edge.filter((k) => k !== key) })),
+      });
+    } else if (layout.edge.length < EDGE_APP_LIMIT) {
+      actions.push({
+        icon: 'albums-outline',
+        label: 'Add to edge panel',
+        run: edit((l) => ({ ...l, edge: [...l.edge, key] })),
+      });
+    }
+
     actions.push(
       {
         icon: 'eye-off-outline',
@@ -70,6 +85,7 @@ export function ActionsSheet({ target, onClose }: { target: ActionTarget | null;
           hidden: l.hidden.includes(key) ? l.hidden : [...l.hidden, key],
           home: l.home.filter((k) => k !== key),
           dock: l.dock.filter((k) => k !== key),
+          edge: l.edge.filter((k) => k !== key),
         })),
       },
       { icon: 'information-circle-outline', label: 'App info', run: () => Launcher.openAppInfo(app.packageName) }

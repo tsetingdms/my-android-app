@@ -21,9 +21,11 @@ import * as Launcher from '../modules/launcher';
 import { ActionsSheet, type ActionTarget } from './components/ActionsSheet';
 import { AppDrawer } from './components/AppDrawer';
 import { useIconLook } from './components/AppIcon';
+import { ControlPanel } from './components/ControlPanel';
+import { EdgeHandle, EdgePanel } from './components/EdgePanel';
 import { DefaultLauncherBanner, Dock, HomeGrid, PageDots, SearchPill } from './components/HomeParts';
 import { SettingsSheet } from './components/SettingsSheet';
-import { Wallpaper } from './components/Wallpaper';
+import { ScreenSizeContext, Wallpaper } from './components/Wallpaper';
 import { ClockWidget } from './components/widgets/ClockWidget';
 import { GlanceRow } from './components/widgets/GlanceRow';
 import { WidgetsPage } from './components/widgets/WidgetsPage';
@@ -31,6 +33,12 @@ import type { App } from './store';
 import { useStore } from './store';
 
 const SWIPE = 70;
+const CONTROLS_DRAG = 320;
+
+const springTo = (value: Animated.Value, toValue: number) =>
+  Animated.spring(value, { toValue, useNativeDriver: true, speed: 20, bounciness: 3 });
+const slideTo = (value: Animated.Value, toValue: number, duration = 220) =>
+  Animated.timing(value, { toValue, duration, easing: Easing.out(Easing.cubic), useNativeDriver: true });
 
 export function Root() {
   const { ready, settings, palette, launch } = useStore();
@@ -38,40 +46,58 @@ export function Root() {
   const { width, height: windowHeight } = useWindowDimensions();
   const H = Math.max(windowHeight, Dimensions.get('screen').height);
   const look = useIconLook();
+  const [screen, setScreen] = useState<{ width: number; height: number } | null>(null);
+  // Heavy overlays mount shortly after startup so the first frame stays fast.
+  const [overlaysReady, setOverlaysReady] = useState(false);
 
-  // Drawer position: H = hidden below the screen, 0 = fully open.
+  // App drawer: y = H hidden below the screen, 0 = fully open.
   const y = useRef(new Animated.Value(H)).current;
   const drawerOpenRef = useRef(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [focusSearch, setFocusSearch] = useState(false);
+
+  // Control panel: 0 hidden, 1 open.
+  const cp = useRef(new Animated.Value(0)).current;
+  const cpOpenRef = useRef(false);
+  const [cpOpen, setCpOpen] = useState(false);
+
+  // Edge panel: 0 hidden, 1 open.
+  const edge = useRef(new Animated.Value(0)).current;
+  const edgeOpenRef = useRef(false);
+  const [edgeOpen, setEdgeOpen] = useState(false);
+
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [target, setTarget] = useState<ActionTarget | null>(null);
   const [page, setPage] = useState(0);
   const pageRef = useRef(0);
   const pagerRef = useRef<ScrollView>(null);
-  const swipeDownRef = useRef(settings.swipeDownNotifications);
-  swipeDownRef.current = settings.swipeDownNotifications;
+  const prefs = useRef({ swipeDown: settings.swipeDown, width });
+  prefs.current = { swipeDown: settings.swipeDown, width };
 
+  useEffect(() => {
+    const t = setTimeout(() => setOverlaysReady(true), 1500);
+    return () => clearTimeout(t);
+  }, []);
+
+  // ---------- Drawer ----------
   const openDrawer = useCallback(
     (search: boolean) => {
+      setOverlaysReady(true);
       setFocusSearch(search);
       drawerOpenRef.current = true;
       setDrawerOpen(true);
-      Animated.spring(y, { toValue: 0, useNativeDriver: true, speed: 20, bounciness: 2 }).start();
+      springTo(y, 0).start();
     },
     [y]
   );
-
-  const settleClosed = useCallback(() => {
-    Animated.timing(y, { toValue: H, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-  }, [y, H]);
-
+  const settleDrawerOpen = useCallback(() => springTo(y, 0).start(), [y]);
+  const settleDrawerClosed = useCallback(() => slideTo(y, H, 200).start(), [y, H]);
   const closeDrawer = useCallback(
     (animated = true) => {
       drawerOpenRef.current = false;
       Keyboard.dismiss();
       if (animated) {
-        Animated.timing(y, { toValue: H, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(() => {
+        slideTo(y, H).start(() => {
           if (!drawerOpenRef.current) setDrawerOpen(false);
         });
       } else {
@@ -80,6 +106,44 @@ export function Root() {
       }
     },
     [y, H]
+  );
+
+  // ---------- Control panel ----------
+  const openControls = useCallback(() => {
+    setOverlaysReady(true);
+    cpOpenRef.current = true;
+    setCpOpen(true);
+    springTo(cp, 1).start();
+  }, [cp]);
+  const settleControlsOpen = useCallback(() => springTo(cp, 1).start(), [cp]);
+  const closeControls = useCallback(() => {
+    cpOpenRef.current = false;
+    slideTo(cp, 0, 200).start(() => {
+      if (!cpOpenRef.current) setCpOpen(false);
+    });
+  }, [cp]);
+
+  // ---------- Edge panel ----------
+  const openEdge = useCallback(() => {
+    setOverlaysReady(true);
+    edgeOpenRef.current = true;
+    setEdgeOpen(true);
+    springTo(edge, 1).start();
+  }, [edge]);
+  const settleEdgeOpen = useCallback(() => springTo(edge, 1).start(), [edge]);
+  const closeEdge = useCallback(
+    (animated = true) => {
+      edgeOpenRef.current = false;
+      if (animated) {
+        slideTo(edge, 0, 200).start(() => {
+          if (!edgeOpenRef.current) setEdgeOpen(false);
+        });
+      } else {
+        edge.setValue(0);
+        setEdgeOpen(false);
+      }
+    },
+    [edge]
   );
 
   const goToPage = useCallback(
@@ -91,68 +155,82 @@ export function Root() {
     [width]
   );
 
-  // Swipe up on the home page opens the drawer (following the finger); swipe down pulls the notification shade.
+  const overlayOpen = () => drawerOpenRef.current || cpOpenRef.current || edgeOpenRef.current;
+
+  // Home gestures (page 1 only, nothing open): swipe up = drawer (follows the finger);
+  // swipe down = control panel or notifications, depending on settings.
+  const downMode = useRef<'controls' | 'notifications'>('controls');
   const homePan = useMemo(
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponderCapture: (_, g) =>
-          !drawerOpenRef.current && pageRef.current === 0 && Math.abs(g.dy) > 12 && Math.abs(g.dy) > Math.abs(g.dx) * 1.4,
+          !overlayOpen() && pageRef.current === 0 && Math.abs(g.dy) > 12 && Math.abs(g.dy) > Math.abs(g.dx) * 1.4,
+        onPanResponderGrant: (_, g) => {
+          const { swipeDown, width: w } = prefs.current;
+          downMode.current =
+            swipeDown === 'notifications' || (swipeDown === 'split' && g.x0 < w / 2) ? 'notifications' : 'controls';
+        },
         onPanResponderMove: (_, g) => {
-          if (g.dy < 0) y.setValue(Math.max(0, H + g.dy * 1.15));
+          if (g.dy < 0) {
+            cp.setValue(0);
+            y.setValue(Math.max(0, H + g.dy * 1.15));
+          } else {
+            y.setValue(H);
+            if (downMode.current === 'controls') cp.setValue(Math.min(1, g.dy / CONTROLS_DRAG));
+          }
         },
         onPanResponderRelease: (_, g) => {
-          if (g.dy < -SWIPE || g.vy < -0.6) {
-            openDrawer(false);
+          if (g.dy < 0) {
+            if (g.dy < -SWIPE || g.vy < -0.6) openDrawer(false);
+            else settleDrawerClosed();
             return;
           }
-          settleClosed();
-          if (g.dy > SWIPE && swipeDownRef.current) Launcher.expandNotifications();
+          settleDrawerClosed();
+          if (downMode.current === 'controls') {
+            if (g.dy > SWIPE || g.vy > 0.5) openControls();
+            else closeControls();
+          } else if (g.dy > SWIPE) {
+            Launcher.expandNotifications();
+          }
         },
         onPanResponderTerminate: () => {
-          if (!drawerOpenRef.current) settleClosed();
+          if (!drawerOpenRef.current) settleDrawerClosed();
+          if (!cpOpenRef.current) closeControls();
         },
         onPanResponderTerminationRequest: () => false,
       }),
-    [y, H, openDrawer, settleClosed]
+    [y, cp, H, openDrawer, settleDrawerClosed, openControls, closeControls]
   );
 
-  // Drag the drawer's header down to close it.
-  const drawerPan = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_, g) => g.dy > 10 && Math.abs(g.dy) > Math.abs(g.dx),
-        onPanResponderMove: (_, g) => y.setValue(Math.max(0, g.dy)),
-        onPanResponderRelease: (_, g) => {
-          if (g.dy > 90 || g.vy > 0.6) closeDrawer();
-          else Animated.spring(y, { toValue: 0, useNativeDriver: true, speed: 20, bounciness: 2 }).start();
-        },
-        onPanResponderTerminate: () => {
-          Animated.spring(y, { toValue: 0, useNativeDriver: true, speed: 20, bounciness: 2 }).start();
-        },
-      }),
-    [y, closeDrawer]
-  );
+  const closeAll = useCallback(() => {
+    setSettingsOpen(false);
+    setTarget(null);
+    if (drawerOpenRef.current) closeDrawer();
+    if (cpOpenRef.current) closeControls();
+    if (edgeOpenRef.current) closeEdge();
+  }, [closeDrawer, closeControls, closeEdge]);
 
   // Back never leaves the launcher; it just closes whatever is open.
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       if (drawerOpenRef.current) closeDrawer();
+      else if (cpOpenRef.current) closeControls();
+      else if (edgeOpenRef.current) closeEdge();
       else if (pageRef.current !== 0) goToPage(0);
       return true;
     });
     return () => sub.remove();
-  }, [closeDrawer, goToPage]);
+  }, [closeDrawer, closeControls, closeEdge, goToPage]);
 
-  // Home button while the launcher is showing: return to the main page.
+  // Home button while the launcher is showing: close everything and return to the main page.
   useEffect(
     () =>
       Launcher.addHomePressedListener(() => {
-        setSettingsOpen(false);
-        setTarget(null);
-        if (drawerOpenRef.current) closeDrawer();
-        else goToPage(0);
+        const wasOpen = overlayOpen();
+        closeAll();
+        if (!wasOpen) goToPage(0);
       }),
-    [closeDrawer, goToPage]
+    [closeAll, goToPage]
   );
 
   const onLaunchHome = useCallback((app: App) => launch(app), [launch]);
@@ -163,9 +241,17 @@ export function Root() {
     },
     [launch, closeDrawer]
   );
+  const onLaunchEdge = useCallback(
+    (app: App) => {
+      launch(app);
+      setTimeout(() => closeEdge(false), 350);
+    },
+    [launch, closeEdge]
+  );
   const onLongHome = useCallback((app: App) => setTarget({ app, source: 'home' }), []);
   const onLongDock = useCallback((app: App) => setTarget({ app, source: 'dock' }), []);
   const onLongDrawer = useCallback((app: App) => setTarget({ app, source: 'drawer' }), []);
+  const onLongEdge = useCallback((app: App) => setTarget({ app, source: 'edge' }), []);
   const openSettings = useCallback(() => setSettingsOpen(true), []);
 
   const onPageScrollEnd = useCallback(
@@ -177,68 +263,108 @@ export function Root() {
     [width]
   );
 
-  const homeOpacity = useMemo(
-    () => y.interpolate({ inputRange: [0, H * 0.7, H], outputRange: [0, 0.6, 1], extrapolate: 'clamp' }),
-    [y, H]
-  );
-  const homeScale = useMemo(
-    () => y.interpolate({ inputRange: [0, H], outputRange: [0.94, 1], extrapolate: 'clamp' }),
-    [y, H]
-  );
+  // The home screen recedes behind whatever opens: drawer (fade), control panel (dim + shrink)
+  // and edge panel (tilts back in 3D, like the Honor side bar).
+  const homeStyle = useMemo(() => {
+    const drawerOpacity = y.interpolate({ inputRange: [0, H * 0.7, H], outputRange: [0, 0.6, 1], extrapolate: 'clamp' });
+    const drawerScale = y.interpolate({ inputRange: [0, H], outputRange: [0.94, 1], extrapolate: 'clamp' });
+    const cpOpacity = cp.interpolate({ inputRange: [0, 1], outputRange: [1, 0.35], extrapolate: 'clamp' });
+    const cpScale = cp.interpolate({ inputRange: [0, 1], outputRange: [1, 0.94], extrapolate: 'clamp' });
+    const edgeScale = edge.interpolate({ inputRange: [0, 1], outputRange: [1, 0.86], extrapolate: 'clamp' });
+    return {
+      opacity: Animated.multiply(drawerOpacity, cpOpacity),
+      transform: [
+        { perspective: 1000 },
+        { translateX: edge.interpolate({ inputRange: [0, 1], outputRange: [0, -width * 0.1], extrapolate: 'clamp' }) },
+        { rotateY: edge.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '12deg'], extrapolate: 'clamp' }) },
+        { scale: Animated.multiply(Animated.multiply(drawerScale, cpScale), edgeScale) },
+      ],
+    };
+  }, [y, cp, edge, H, width]);
 
   if (!ready) return <StatusBar style="light" />;
 
   return (
-    <View style={styles.root}>
-      <StatusBar style={palette.dark ? 'light' : 'dark'} />
-      <Wallpaper />
-
-      <Animated.View
-        {...homePan.panHandlers}
-        style={[styles.root, { opacity: homeOpacity, transform: [{ scale: homeScale }] }]}
+    <ScreenSizeContext.Provider value={screen}>
+      <View
+        style={styles.root}
+        onLayout={(e) => setScreen({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })}
       >
-        <ScrollView
-          ref={pagerRef}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          onMomentumScrollEnd={onPageScrollEnd}
-          keyboardShouldPersistTaps="handled"
-          style={styles.root}
-        >
-          <Pressable style={{ width }} onLongPress={openSettings} delayLongPress={450}>
-            <View style={{ paddingTop: insets.top }}>
-              <DefaultLauncherBanner />
-              {settings.showClock && <ClockWidget />}
-              {settings.showGlance && <GlanceRow />}
-            </View>
-            <View style={styles.root} />
-            <HomeGrid look={look} onPress={onLaunchHome} onLongPress={onLongHome} />
-          </Pressable>
-          <WidgetsPage width={width} bottomInset={0} onOpenSettings={openSettings} />
-        </ScrollView>
+        <StatusBar style={palette.dark ? 'light' : 'dark'} />
+        <Wallpaper />
 
-        <View style={{ paddingBottom: insets.bottom + 10, paddingTop: 6 }}>
-          <PageDots page={page} count={2} />
-          {settings.showSearch && <SearchPill onPress={() => openDrawer(true)} onOpenDrawer={() => openDrawer(false)} />}
-          <Dock look={look} onPress={onLaunchHome} onLongPress={onLongDock} />
-        </View>
-      </Animated.View>
+        <Animated.View {...homePan.panHandlers} style={[styles.root, homeStyle]}>
+          <ScrollView
+            ref={pagerRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={onPageScrollEnd}
+            keyboardShouldPersistTaps="handled"
+            style={styles.root}
+          >
+            <Pressable style={{ width }} onLongPress={openSettings} delayLongPress={450}>
+              <View style={{ paddingTop: insets.top }}>
+                <DefaultLauncherBanner />
+                {settings.showClock && <ClockWidget />}
+                {settings.showGlance && <GlanceRow />}
+              </View>
+              <View style={styles.root} />
+              <HomeGrid look={look} onPress={onLaunchHome} onLongPress={onLongHome} />
+            </Pressable>
+            <WidgetsPage width={width} bottomInset={0} onOpenSettings={openSettings} />
+          </ScrollView>
 
-      <AppDrawer
-        y={y}
-        open={drawerOpen}
-        focusSearch={focusSearch}
-        look={look}
-        headerPanHandlers={drawerPan.panHandlers}
-        onLaunch={onLaunchDrawer}
-        onLongPressApp={onLongDrawer}
-        onOpenSettings={openSettings}
-      />
+          <View style={{ paddingBottom: insets.bottom + 10, paddingTop: 6 }}>
+            <PageDots page={page} count={2} />
+            {settings.showSearch && <SearchPill onPress={() => openDrawer(true)} onOpenDrawer={() => openDrawer(false)} />}
+            <Dock look={look} onPress={onLaunchHome} onLongPress={onLongDock} />
+          </View>
+        </Animated.View>
 
-      <ActionsSheet target={target} onClose={() => setTarget(null)} />
-      <SettingsSheet visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
-    </View>
+        {settings.edgePanel && (
+          <EdgeHandle progress={edge} position={settings.edgeHandle} onOpen={openEdge} onClose={() => closeEdge()} />
+        )}
+
+        <AppDrawer
+          y={y}
+          open={drawerOpen}
+          focusSearch={focusSearch}
+          look={look}
+          onLaunch={onLaunchDrawer}
+          onLongPressApp={onLongDrawer}
+          onOpenSettings={openSettings}
+          onRequestClose={closeDrawer}
+          onSettle={settleDrawerOpen}
+        />
+
+        {overlaysReady && (
+          <ControlPanel progress={cp} open={cpOpen} onClose={closeControls} onSettle={settleControlsOpen} />
+        )}
+
+        {overlaysReady && settings.edgePanel && (
+          <EdgePanel
+            progress={edge}
+            open={edgeOpen}
+            onClose={() => closeEdge()}
+            onSettle={settleEdgeOpen}
+            onLaunch={onLaunchEdge}
+            onLongPressApp={onLongEdge}
+            onOpenControls={() => {
+              closeEdge();
+              openControls();
+            }}
+            onOpenDrawer={() => {
+              closeEdge();
+              openDrawer(false);
+            }}
+          />
+        )}
+
+        <ActionsSheet target={target} onClose={() => setTarget(null)} />
+        <SettingsSheet visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      </View>
+    </ScreenSizeContext.Provider>
   );
 }
 
