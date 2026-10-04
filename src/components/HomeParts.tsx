@@ -1,6 +1,8 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useEffect, useState } from 'react';
+import { AppState, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
+import * as Launcher from '../../modules/launcher';
 import type { App } from '../store';
 import { useStore } from '../store';
 import { AppIcon, type IconLook } from './AppIcon';
@@ -108,6 +110,34 @@ export function SearchPill({ onPress, onOpenDrawer }: { onPress: () => void; onO
   );
 }
 
+/** Shown until Lumo is the default home app. */
+export function DefaultLauncherBanner() {
+  const { palette } = useStore();
+  const [show, setShow] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    if (!Launcher.isAvailable) return;
+    const check = () => setShow(!Launcher.isDefaultLauncher());
+    check();
+    const sub = AppState.addEventListener('change', (s) => s === 'active' && check());
+    return () => sub.remove();
+  }, []);
+
+  if (!show || dismissed) return null;
+  return (
+    <GlassButton radius={20} style={styles.banner} onPress={Launcher.requestHomeRole}>
+      <View style={styles.bannerInner}>
+        <Ionicons name="home-outline" size={20} color={palette.accent} />
+        <Text style={[styles.bannerText, { color: palette.text }]}>Tap to set Lumo as your home screen</Text>
+        <Pressable hitSlop={12} onPress={() => setDismissed(true)}>
+          <Ionicons name="close" size={18} color={palette.subtext} />
+        </Pressable>
+      </View>
+    </GlassButton>
+  );
+}
+
 export function PageDots({ page, count }: { page: number; count: number }) {
   const { palette } = useStore();
   return (
@@ -181,6 +211,22 @@ const styles = StyleSheet.create({
     height: 46,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  banner: {
+    marginHorizontal: 16,
+    marginTop: 8,
+  },
+  bannerInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  bannerText: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: 'sans-serif-medium',
   },
   dots: {
     flexDirection: 'row',

@@ -2,6 +2,7 @@ package expo.modules.launcher
 
 import android.app.ActivityManager
 import android.app.WallpaperManager
+import android.app.role.RoleManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -78,6 +79,10 @@ class LauncherModule : Module() {
       start(Intent(Settings.ACTION_HOME_SETTINGS)) || start(Intent(Settings.ACTION_SETTINGS))
     }
 
+    Function("requestHomeRole") {
+      requestHomeRole()
+    }
+
     Function("openWallpaperPicker") {
       start(Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "Choose wallpaper"))
     }
@@ -92,7 +97,8 @@ class LauncherModule : Module() {
 
     Function("openCalendar") {
       val uri = Uri.parse("content://com.android.calendar/time/${System.currentTimeMillis()}")
-      start(Intent(Intent.ACTION_VIEW, uri))
+      start(Intent(Intent.ACTION_VIEW, uri)) ||
+        start(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALENDAR))
     }
 
     Function("expandNotifications") {
@@ -253,6 +259,23 @@ class LauncherModule : Module() {
     }
   }
 
+  // Android 10+ shows a one-tap "Set as default home app" dialog; older versions open the settings page.
+  private fun requestHomeRole(): Boolean {
+    val activity = appContext.currentActivity
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && activity != null) {
+      try {
+        val roles = activity.getSystemService(RoleManager::class.java)
+        if (roles != null && roles.isRoleAvailable(RoleManager.ROLE_HOME) && !roles.isRoleHeld(RoleManager.ROLE_HOME)) {
+          activity.startActivityForResult(roles.createRequestRoleIntent(RoleManager.ROLE_HOME), HOME_ROLE_REQUEST)
+          return true
+        }
+      } catch (e: Exception) {
+        // Fall through to the settings screen.
+      }
+    }
+    return start(Intent(Settings.ACTION_HOME_SETTINGS)) || start(Intent(Settings.ACTION_SETTINGS))
+  }
+
   private fun isDefaultLauncher(): Boolean {
     val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
 
@@ -388,4 +411,8 @@ class LauncherModule : Module() {
   }
 
   // endregion
+
+  companion object {
+    private const val HOME_ROLE_REQUEST = 4242
+  }
 }

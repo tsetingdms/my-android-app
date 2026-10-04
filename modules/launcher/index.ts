@@ -45,6 +45,7 @@ declare class LauncherNativeModule extends NativeModule<LauncherEvents> {
   uninstallApp(packageName: string): boolean;
   isDefaultLauncher(): boolean;
   openHomeSettings(): boolean;
+  requestHomeRole(): boolean;
   openWallpaperPicker(): boolean;
   openSettingsPanel(panel: SettingsPanel): boolean;
   openAlarms(): boolean;
@@ -71,6 +72,7 @@ export const openAppInfo = (packageName: string) => native?.openAppInfo(packageN
 export const uninstallApp = (packageName: string) => native?.uninstallApp(packageName) ?? false;
 export const isDefaultLauncher = () => native?.isDefaultLauncher() ?? false;
 export const openHomeSettings = () => native?.openHomeSettings() ?? false;
+export const requestHomeRole = () => native?.requestHomeRole() ?? false;
 export const openWallpaperPicker = () => native?.openWallpaperPicker() ?? false;
 export const openSettingsPanel = (panel: SettingsPanel) => native?.openSettingsPanel(panel) ?? false;
 export const openAlarms = () => native?.openAlarms() ?? false;

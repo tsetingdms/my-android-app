@@ -121,6 +121,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [wallpaperColor, setWallpaperColor] = useState<string | null>(null);
   const lastRefresh = useRef(0);
   const loadingRef = useRef(false);
+  const lastAppsJson = useRef('');
 
   // Load everything saved on the phone.
   useEffect(() => {
@@ -129,7 +130,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const [s, l, a] = await AsyncStorage.multiGet([KEYS.settings, KEYS.layout, KEYS.apps]);
         if (s[1]) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(s[1]) });
         if (l[1]) setLayout({ ...DEFAULT_LAYOUT, ...JSON.parse(l[1]) });
-        if (a[1]) setApps(JSON.parse(a[1]));
+        if (a[1]) {
+          lastAppsJson.current = a[1];
+          setApps(JSON.parse(a[1]));
+        }
       } catch {
         // Corrupt storage: fall back to defaults.
       }
@@ -160,8 +164,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     lastRefresh.current = Date.now();
     try {
       const list = sortApps(await Launcher.getApps(ICON_PX));
-      setApps(list);
-      AsyncStorage.setItem(KEYS.apps, JSON.stringify(list)).catch(() => {});
+      const json = JSON.stringify(list);
+      // Skip re-rendering every icon when nothing was installed, removed or updated.
+      if (json !== lastAppsJson.current) {
+        lastAppsJson.current = json;
+        setApps(list);
+        AsyncStorage.setItem(KEYS.apps, json).catch(() => {});
+      }
       setWallpaperColor(Launcher.getWallpaperColor());
     } catch {
       // Keep the cached list.
@@ -178,7 +187,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setTimeout(refreshApps, 400);
     });
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active' && Date.now() - lastRefresh.current > 30_000) refreshApps();
+      if (state === 'active' && Date.now() - lastRefresh.current > 5 * 60_000) refreshApps();
     });
     return () => {
       offApps();
@@ -211,7 +220,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const launch = useCallback((app: App) => {
     Launcher.launchApp(app.packageName, app.activityName);
-    setLayout((l) => ({ ...l, launches: { ...l.launches, [app.key]: (l.launches[app.key] ?? 0) + 1 } }));
+    // Count launches after the app's opening animation so the launcher doesn't re-render mid-transition.
+    setTimeout(() => {
+      setLayout((l) => ({ ...l, launches: { ...l.launches, [app.key]: (l.launches[app.key] ?? 0) + 1 } }));
+    }, 800);
   }, []);
 
   const dark = settings.theme === 'auto' ? scheme !== 'light' : settings.theme === 'dark';

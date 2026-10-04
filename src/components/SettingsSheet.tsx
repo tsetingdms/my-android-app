@@ -49,7 +49,7 @@ export function SettingsSheet({ visible, onClose }: Props) {
 
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40, gap: 14 }}>
           {!isDefault && Launcher.isAvailable && (
-            <GlassButton radius={22} onPress={Launcher.openHomeSettings}>
+            <GlassButton radius={22} onPress={Launcher.requestHomeRole}>
               <LinearGradient
                 colors={[palette.accent, '#BF5AF2']}
                 start={{ x: 0, y: 0 }}

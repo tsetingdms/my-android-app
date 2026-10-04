@@ -21,7 +21,7 @@ import * as Launcher from '../modules/launcher';
 import { ActionsSheet, type ActionTarget } from './components/ActionsSheet';
 import { AppDrawer } from './components/AppDrawer';
 import { useIconLook } from './components/AppIcon';
-import { Dock, HomeGrid, PageDots, SearchPill } from './components/HomeParts';
+import { DefaultLauncherBanner, Dock, HomeGrid, PageDots, SearchPill } from './components/HomeParts';
 import { SettingsSheet } from './components/SettingsSheet';
 import { Wallpaper } from './components/Wallpaper';
 import { ClockWidget } from './components/widgets/ClockWidget';
@@ -177,8 +177,14 @@ export function Root() {
     [width]
   );
 
-  const homeOpacity = y.interpolate({ inputRange: [0, H * 0.7, H], outputRange: [0, 0.6, 1], extrapolate: 'clamp' });
-  const homeScale = y.interpolate({ inputRange: [0, H], outputRange: [0.94, 1], extrapolate: 'clamp' });
+  const homeOpacity = useMemo(
+    () => y.interpolate({ inputRange: [0, H * 0.7, H], outputRange: [0, 0.6, 1], extrapolate: 'clamp' }),
+    [y, H]
+  );
+  const homeScale = useMemo(
+    () => y.interpolate({ inputRange: [0, H], outputRange: [0.94, 1], extrapolate: 'clamp' }),
+    [y, H]
+  );
 
   if (!ready) return <StatusBar style="light" />;
 
@@ -202,6 +208,7 @@ export function Root() {
         >
           <Pressable style={{ width }} onLongPress={openSettings} delayLongPress={450}>
             <View style={{ paddingTop: insets.top }}>
+              <DefaultLauncherBanner />
               {settings.showClock && <ClockWidget />}
               {settings.showGlance && <GlanceRow />}
             </View>
