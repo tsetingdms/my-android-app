@@ -7,6 +7,11 @@ on:
     paths-ignore:
       - '**.md'
   workflow_dispatch:
+    inputs:
+      release:
+        description: Publish a GitHub Release (untick for a test build)
+        type: boolean
+        default: true
 
 # Least privilege by default; only the release job can write to the repo.
 permissions:
@@ -79,6 +84,7 @@ jobs:
   # Holds the signing key and the write token, and runs no project or npm code.
   release:
     needs: build
+    if: github.event_name == 'push' || inputs.release
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

@@ -1,5 +1,6 @@
 package expo.modules.launcher
 
+import android.app.Activity
 import android.app.ActivityManager
 import android.app.WallpaperManager
 import android.app.role.RoleManager
@@ -14,8 +15,6 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
-import android.hardware.camera2.CameraCharacteristics
-import android.hardware.camera2.CameraManager
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
@@ -23,7 +22,10 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.StatFs
 import android.provider.AlarmClock
+import android.provider.MediaStore
 import android.provider.Settings
+import expo.modules.kotlin.Promise
+import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.File
@@ -34,18 +36,29 @@ class LauncherModule : Module() {
     get() = appContext.reactContext ?: throw IllegalStateException("React context is not available")
 
   private var packageReceiver: BroadcastReceiver? = null
+  private var pendingPhoto: Promise? = null
+  private var pendingPhotoSize = 1080
 
   override fun definition() = ModuleDefinition {
     Name("Launcher")
 
-    Events("onAppsChanged", "onHomePressed")
+    Events("onAppsChanged", "onHomePressed", "onTorchChanged")
 
     OnCreate {
       registerPackageReceiver()
+      appContext.reactContext?.let { ctx ->
+        if (LockScreen.isEnabled(ctx)) LockScreen.register(ctx)
+        SystemControls.watchTorch(ctx) { on -> sendEvent("onTorchChanged", Bundle().apply { putBoolean("on", on) }) }
+      }
     }
 
     OnDestroy {
       unregisterPackageReceiver()
+      appContext.reactContext?.let { SystemControls.unwatchTorch(it) }
+    }
+
+    OnActivityResult { _, payload ->
+      if (payload.requestCode == PHOTO_REQUEST) onPhotoPicked(payload.resultCode, payload.data)
     }
 
     // Pressing the home button while we are the default launcher re-delivers the HOME intent.
@@ -106,8 +119,90 @@ class LauncherModule : Module() {
     }
 
     Function("setTorch") { on: Boolean ->
-      setTorch(on)
+      SystemControls.setTorch(context, on)
     }
+
+    // region Control panel
+
+    Function("getSystemState") {
+      SystemControls.state(context)
+    }
+
+    Function("setVolume") { fraction: Double ->
+      SystemControls.setVolume(context, fraction)
+    }
+
+    Function("setBrightness") { fraction: Double ->
+      SystemControls.setBrightness(context, fraction)
+    }
+
+    Function("setAutoBrightness") { on: Boolean ->
+      SystemControls.setAutoBrightness(context, on)
+    }
+
+    Function("setAutoRotate") { on: Boolean ->
+      SystemControls.setAutoRotate(context, on)
+    }
+
+    Function("requestWriteSettings") {
+      start(SystemControls.requestWriteSettingsIntent(context))
+    }
+
+    Function("cycleRinger") {
+      SystemControls.cycleRinger(context)
+    }
+
+    Function("mediaKey") { action: String ->
+      SystemControls.mediaKey(context, action)
+    }
+
+    Function("openCamera") {
+      LockScreenActivity.openCamera() || start(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA))
+    }
+
+    Function("openCalculator") {
+      start(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALCULATOR)) ||
+        launchPackage("com.google.android.calculator")
+    }
+
+    // endregion
+
+    // region Wallpaper photo
+
+    AsyncFunction("pickWallpaperPhoto") { maxShortSide: Int, promise: Promise ->
+      val activity = appContext.currentActivity
+      if (activity == null || pendingPhoto != null) {
+        promise.reject("E_PICKER", "The photo picker is not available right now", null)
+      } else {
+        pendingPhoto = promise
+        pendingPhotoSize = maxShortSide
+        val pick = Intent(Intent.ACTION_GET_CONTENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE)
+        try {
+          activity.startActivityForResult(Intent.createChooser(pick, "Choose a wallpaper"), PHOTO_REQUEST)
+        } catch (e: Exception) {
+          pendingPhoto = null
+          promise.reject("E_PICKER", "No app can pick photos", e)
+        }
+      }
+    }.runOnQueue(Queues.MAIN)
+
+    // endregion
+
+    // region Lock screen
+
+    Function("setLockScreenEnabled") { enabled: Boolean ->
+      LockScreen.setEnabled(context, enabled)
+    }
+
+    Function("isLockScreenEnabled") {
+      LockScreen.isEnabled(context)
+    }
+
+    Function("unlockScreen") {
+      LockScreenActivity.unlock()
+    }
+
+    // endregion
 
     Function("getBattery") {
       battery()
@@ -245,6 +340,30 @@ class LauncherModule : Module() {
     return start(fallback)
   }
 
+  private fun launchPackage(packageName: String): Boolean {
+    val intent = context.packageManager.getLaunchIntentForPackage(packageName) ?: return false
+    return start(intent)
+  }
+
+  private fun onPhotoPicked(resultCode: Int, data: Intent?) {
+    val promise = pendingPhoto ?: return
+    pendingPhoto = null
+    val uri = data?.data
+    if (resultCode != Activity.RESULT_OK || uri == null) {
+      promise.resolve(null)
+      return
+    }
+    val ctx = context
+    val size = pendingPhotoSize
+    Thread {
+      try {
+        promise.resolve(WallpaperPhoto.save(ctx, uri, size))
+      } catch (e: Exception) {
+        promise.reject("E_PHOTO", e.message ?: "Couldn't use that picture", e)
+      }
+    }.start()
+  }
+
   private fun start(intent: Intent): Boolean {
     return try {
       val activity = appContext.currentActivity
@@ -355,19 +474,6 @@ class LauncherModule : Module() {
     }
   }
 
-  private fun setTorch(on: Boolean): Boolean {
-    return try {
-      val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-      val id = manager.cameraIdList.firstOrNull {
-        manager.getCameraCharacteristics(it).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
-      } ?: return false
-      manager.setTorchMode(id, on)
-      true
-    } catch (e: Exception) {
-      false
-    }
-  }
-
   // endregion
 
   // region Device info
@@ -414,5 +520,6 @@ class LauncherModule : Module() {
 
   companion object {
     private const val HOME_ROLE_REQUEST = 4242
+    private const val PHOTO_REQUEST = 4243
   }
 }

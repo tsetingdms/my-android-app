@@ -3,6 +3,12 @@
   <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
   <!-- Let the user uninstall apps from the launcher -->
   <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+  <!-- Control panel: show Wi-Fi / mobile data / Bluetooth on-off state (read-only, no prompts) -->
+  <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+  <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+  <!-- Control panel brightness / auto-rotate. Special access the user grants in Settings, only if they want it -->
+  <uses-permission android:name="android.permission.WRITE_SETTINGS" />
 
   <!-- Android 11+ package visibility: see every app that has a launcher icon -->
   <queries>

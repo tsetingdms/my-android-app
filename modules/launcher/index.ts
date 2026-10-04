@@ -21,6 +21,26 @@ export type DeviceStats = {
   storageAvailable: number;
 };
 
+export type SystemState = {
+  wifi: boolean | null;
+  mobileData: boolean | null;
+  bluetooth: boolean | null;
+  airplane: boolean;
+  location: boolean | null;
+  autoRotate: boolean;
+  autoBrightness: boolean;
+  /** 0..1, perceptual. */
+  brightness: number;
+  /** 0..1 media volume. */
+  volume: number;
+  ringer: 'normal' | 'vibrate' | 'silent';
+  musicActive: boolean;
+  torch: boolean;
+  canWriteSettings: boolean;
+};
+
+export type MediaAction = 'play_pause' | 'next' | 'previous';
+
 export type SettingsPanel =
   | 'wifi'
   | 'internet'
@@ -36,6 +56,7 @@ export type SettingsPanel =
 type LauncherEvents = {
   onAppsChanged(event: { action: string; packageName: string }): void;
   onHomePressed(): void;
+  onTorchChanged(event: { on: boolean }): void;
 };
 
 declare class LauncherNativeModule extends NativeModule<LauncherEvents> {
@@ -55,6 +76,20 @@ declare class LauncherNativeModule extends NativeModule<LauncherEvents> {
   getBattery(): BatteryInfo;
   getDeviceStats(): Promise<DeviceStats>;
   getWallpaperColor(): string | null;
+  getSystemState(): SystemState;
+  setVolume(fraction: number): boolean;
+  setBrightness(fraction: number): boolean;
+  setAutoBrightness(on: boolean): boolean;
+  setAutoRotate(on: boolean): boolean;
+  requestWriteSettings(): boolean;
+  cycleRinger(): SystemState['ringer'];
+  mediaKey(action: MediaAction): boolean;
+  openCamera(): boolean;
+  openCalculator(): boolean;
+  pickWallpaperPhoto(maxShortSide: number): Promise<string | null>;
+  setLockScreenEnabled(enabled: boolean): void;
+  isLockScreenEnabled(): boolean;
+  unlockScreen(): boolean;
 }
 
 // Optional so the JS still loads (with empty data) outside a native Android build.
@@ -80,6 +115,46 @@ export const openCalendar = () => native?.openCalendar() ?? false;
 export const expandNotifications = () => native?.expandNotifications() ?? false;
 export const setTorch = (on: boolean) => native?.setTorch(on) ?? false;
 export const getWallpaperColor = () => native?.getWallpaperColor() ?? null;
+
+const NO_STATE: SystemState = {
+  wifi: null,
+  mobileData: null,
+  bluetooth: null,
+  airplane: false,
+  location: null,
+  autoRotate: false,
+  autoBrightness: false,
+  brightness: 0.5,
+  volume: 0.5,
+  ringer: 'normal',
+  musicActive: false,
+  torch: false,
+  canWriteSettings: false,
+};
+
+export const getSystemState = (): SystemState => native?.getSystemState() ?? NO_STATE;
+export const setVolume = (fraction: number) => native?.setVolume(fraction) ?? false;
+export const setBrightness = (fraction: number) => native?.setBrightness(fraction) ?? false;
+export const setAutoBrightness = (on: boolean) => native?.setAutoBrightness(on) ?? false;
+export const setAutoRotate = (on: boolean) => native?.setAutoRotate(on) ?? false;
+export const requestWriteSettings = () => native?.requestWriteSettings() ?? false;
+export const cycleRinger = (): SystemState['ringer'] => native?.cycleRinger() ?? 'normal';
+export const mediaKey = (action: MediaAction) => native?.mediaKey(action) ?? false;
+export const openCamera = () => native?.openCamera() ?? false;
+export const openCalculator = () => native?.openCalculator() ?? false;
+export const setLockScreenEnabled = (enabled: boolean) => native?.setLockScreenEnabled(enabled);
+export const isLockScreenEnabled = () => native?.isLockScreenEnabled() ?? false;
+export const unlockScreen = () => native?.unlockScreen() ?? false;
+
+/** Opens the system picker; resolves to a file:// URI of the saved, downscaled copy, or null if cancelled. */
+export function pickWallpaperPhoto(maxShortSide: number): Promise<string | null> {
+  return native ? native.pickWallpaperPhoto(maxShortSide) : Promise.resolve(null);
+}
+
+export function addTorchListener(listener: (on: boolean) => void) {
+  const sub = native?.addListener('onTorchChanged', (e) => listener(e.on));
+  return () => sub?.remove();
+}
 
 export function getBattery(): BatteryInfo {
   return native?.getBattery() ?? { level: -1, charging: false, temperature: 0 };

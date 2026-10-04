@@ -13,3 +13,8 @@ android {
     versionName "1.0.0"
   }
 }
+
+dependencies {
+  // LockScreenActivity hosts a React Native screen; the version comes from the app's React Native.
+  implementation 'com.facebook.react:react-android'
+}

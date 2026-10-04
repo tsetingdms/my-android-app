@@ -25,6 +25,26 @@ function withHomeIntent(config) {
       });
     }
     activity['intent-filter'] = filters;
+
+    // Optional Lumo lock screen (expo.modules.launcher.LockScreenActivity) shown over the keyguard.
+    const app = AndroidConfig.Manifest.getMainApplicationOrThrow(cfg.modResults);
+    const lockName = 'expo.modules.launcher.LockScreenActivity';
+    app.activity = (app.activity || []).filter((a) => a.$['android:name'] !== lockName);
+    app.activity.push({
+      $: {
+        'android:name': lockName,
+        'android:theme': '@style/AppTheme',
+        'android:exported': 'false',
+        'android:launchMode': 'singleInstance',
+        'android:taskAffinity': `${cfg.android?.package ?? 'lumo'}.lock`,
+        'android:excludeFromRecents': 'true',
+        'android:showWhenLocked': 'true',
+        'android:screenOrientation': 'portrait',
+        'android:resizeableActivity': 'false',
+        'android:configChanges':
+          'keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize',
+      },
+    });
     return cfg;
   });
 }
