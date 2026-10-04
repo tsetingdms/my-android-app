@@ -202,6 +202,30 @@ class LauncherModule : Module() {
       LockScreenActivity.unlock()
     }
 
+    Function("getLockScreenStatus") {
+      LockScreen.status(context)
+    }
+
+    Function("testLockScreen") {
+      LockScreen.test(context)
+    }
+
+    // "Display over other apps": lets Android start the lock screen from the background reliably.
+    Function("openOverlaySettings") {
+      start(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
+    }
+
+    // Android 13+: the lock-screen fallback posts a (silent, instantly removed) notification.
+    Function("requestNotificationPermission") {
+      val activity = appContext.currentActivity
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && activity != null) {
+        activity.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), NOTIFICATION_REQUEST)
+        true
+      } else {
+        false
+      }
+    }
+
     // endregion
 
     Function("getBattery") {
@@ -522,5 +546,6 @@ class LauncherModule : Module() {
   companion object {
     private const val HOME_ROLE_REQUEST = 4242
     private const val PHOTO_REQUEST = 4243
+    private const val NOTIFICATION_REQUEST = 4244
   }
 }

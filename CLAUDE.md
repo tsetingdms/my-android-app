@@ -3,7 +3,7 @@
 Android home-screen launcher for budget phones (target device: **Moto E40**, Android 11, 720×1600, Unisoc T700, 4 GB RAM).
 Expo SDK 57 (React Native 0.86, New Architecture, Hermes) + TypeScript, plus a local Kotlin Expo module.
 Everything is stored on the phone (AsyncStorage); there is no backend, no account and no network use.
-App version lives in `app.json` (`expo.version` 1.1.0, `android.versionCode` 2).
+App version lives in `app.json` (`expo.version` 1.1.1, `android.versionCode` 3).
 
 ## Repo & branches
 
@@ -120,11 +120,14 @@ node scripts/generate-wallpapers.mjs     # regenerate theme wallpapers in assets
   closes it from anywhere once the list is at the top (the A–Z bar's pan must fail first); gesture objects are
   memoized and read the latest callbacks through refs. Control/edge panels use `PanResponder`s; sliders refuse
   responder termination so swipes on them don't close the panel.
-- **Lock screen** (opt-in, default off): a cover over the real keyguard, not a replacement. It starts on screen-off
-  only while Lumo is the default home app (home apps may start activities from the background), never during a call or
-  ringing, finishes when a secure keyguard is unlocked by fingerprint/face (USER_PRESENT), and finishes in `onStop` only
-  if the screen is on (screen-off must not kill it). Both React surfaces share one JS runtime, so the main app's
-  `BackHandler` also receives Back presses from the lock screen.
+- **Lock screen** (opt-in, default off): a cover over the real keyguard, not a replacement. On screen-off it tries a
+  direct background start (allowed when "Display over other apps" is granted, and for the home app on some Android
+  builds — **not** on the Moto E40); if `LockScreenActivity` hasn't opened within 600 ms it posts a silent
+  full-screen-intent notification (channel `lumo_lock_screen`, the alarm-clock mechanism), which the activity cancels
+  as it opens. Every attempt/open is recorded (`LockScreen.status()` → Customize shows "✓ Opened / ✗ Didn't open",
+  plus "Test lock screen now"). It never covers a call or ringing, finishes when a secure keyguard is unlocked by
+  fingerprint/face (USER_PRESENT), and finishes in `onStop` only if the screen is on (screen-off must not kill it).
+  Both React surfaces share one JS runtime, so the main app's `BackHandler` also receives Back presses from it.
 - **Fonts**: system families via Android names (`sans-serif-thin/-light/-medium/-black`); custom clock fonts by file
   name (`BebasNeue`, `Anton`, `Fredoka`, `Orbitron`, `BigShouldersStencil`, `Unbounded`, `Righteous`). Don't set
   `fontWeight` on custom fonts (Android may fall back to the system font).
@@ -134,10 +137,12 @@ node scripts/generate-wallpapers.mjs     # regenerate theme wallpapers in assets
   downgrade) and bump it with `expo.version` for feature releases.
 - **Security/privacy settings to keep**: `android.allowBackup: false` (app.json) plus `data_extraction_rules.xml` keep
   the note/layout out of backups; release builds have no INTERNET permission — the app must stay offline, so don't add
-  network features without revisiting this (debug builds keep INTERNET for Metro). `blockedPermissions` removes
-  SYSTEM_ALERT_WINDOW and storage permissions. Permissions the module adds: EXPAND_STATUS_BAR, REQUEST_DELETE_PACKAGES,
-  ACCESS_WIFI_STATE, ACCESS_NETWORK_STATE, BLUETOOTH (≤ API 30), WRITE_SETTINGS (special access, asked only when the
-  user touches brightness/rotation).
+  network features without revisiting this (debug builds keep INTERNET for Metro). `blockedPermissions` removes the
+  storage permissions. Permissions the module adds: EXPAND_STATUS_BAR, REQUEST_DELETE_PACKAGES, ACCESS_WIFI_STATE,
+  ACCESS_NETWORK_STATE, BLUETOOTH (≤ API 30), WRITE_SETTINGS (special access, asked only when the user touches
+  brightness/rotation), and for the lock screen USE_FULL_SCREEN_INTENT, POST_NOTIFICATIONS (asked on Android 13+ when
+  it's switched on) and SYSTEM_ALERT_WINDOW (special access, only if the user taps "Allow Display over other apps";
+  used solely as the background-start exemption — Lumo draws no overlays).
 
 ## Adding things
 
@@ -195,4 +200,5 @@ Checklist after changes: swipe up opens the drawer and dragging down from the mi
 A–Z bar jumps; swipe down opens the control panel (tiles tilt, volume/brightness pills, brightness asks for "Modify
 system settings" once); edge bar opens the panel with the 3D tilt; themes apply wallpaper + clock; "My photo" picks
 and blurs; with Lumo as default home and the lock screen on: screen off → on shows the Lumo lock, swipe up asks for the
-PIN/fingerprint, fingerprint alone also dismisses it, and calls are never covered.
+PIN/fingerprint, fingerprint alone also dismisses it, calls are never covered, and Customize → Lock screen shows
+"✓ Opened at …" (if it says "✗ Didn't open", check the overlay permission and Lumo's notifications).

@@ -41,6 +41,18 @@ export type SystemState = {
 
 export type MediaAction = 'play_pause' | 'next' | 'previous';
 
+export type LockScreenStatus = {
+  enabled: boolean;
+  /** The screen-off listener is running. */
+  listening: boolean;
+  /** ms timestamps (0 = never). */
+  lastAttempt: number;
+  lastShown: number;
+  lastVia: 'direct' | 'notification' | 'test' | null;
+  canDrawOverlays: boolean;
+  notificationsEnabled: boolean;
+};
+
 export type SettingsPanel =
   | 'wifi'
   | 'internet'
@@ -91,6 +103,10 @@ declare class LauncherNativeModule extends NativeModule<LauncherEvents> {
   setLockScreenEnabled(enabled: boolean): void;
   isLockScreenEnabled(): boolean;
   unlockScreen(): boolean;
+  getLockScreenStatus(): LockScreenStatus;
+  testLockScreen(): boolean;
+  openOverlaySettings(): boolean;
+  requestNotificationPermission(): boolean;
 }
 
 // Optional so the JS still loads (with empty data) outside a native Android build.
@@ -146,6 +162,10 @@ export const openCalculator = () => native?.openCalculator() ?? false;
 export const setLockScreenEnabled = (enabled: boolean) => native?.setLockScreenEnabled(enabled);
 export const isLockScreenEnabled = () => native?.isLockScreenEnabled() ?? false;
 export const unlockScreen = () => native?.unlockScreen() ?? false;
+export const getLockScreenStatus = (): LockScreenStatus | null => native?.getLockScreenStatus() ?? null;
+export const testLockScreen = () => native?.testLockScreen() ?? false;
+export const openOverlaySettings = () => native?.openOverlaySettings() ?? false;
+export const requestNotificationPermission = () => native?.requestNotificationPermission() ?? false;
 
 /** Opens the system picker; resolves to a file:// URI of the saved, downscaled copy, or null if cancelled. */
 export function pickWallpaperPhoto(maxShortSide: number): Promise<string | null> {

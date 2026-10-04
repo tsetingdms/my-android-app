@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
   AppState,
   Image,
@@ -17,7 +17,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import * as Launcher from '../../modules/launcher';
-import { useMinuteClock } from '../hooks';
+import { formatTime, useMinuteClock } from '../hooks';
 import type { App } from '../store';
 import { useStore } from '../store';
 import {
@@ -52,6 +52,16 @@ export function SettingsSheet({ visible, onClose }: Props) {
   const [isDefault, setIsDefault] = useState(true);
   const [clockTarget, setClockTarget] = useState<'home' | 'lock'>('home');
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [lockStatus, setLockStatus] = useState<Launcher.LockScreenStatus | null>(null);
+  const refreshLock = useCallback(() => setLockStatus(Launcher.getLockScreenStatus()), []);
+
+  // Lock-screen diagnostics: refresh while Customize is open (e.g. after turning the screen off and on).
+  useEffect(() => {
+    if (!visible || !settings.lockEnabled) return;
+    refreshLock();
+    const id = setInterval(refreshLock, 3000);
+    return () => clearInterval(id);
+  }, [visible, settings.lockEnabled, refreshLock]);
 
   useEffect(() => {
     if (!visible) return;
@@ -289,10 +299,33 @@ export function SettingsSheet({ visible, onClose }: Props) {
               label="Lumo lock screen"
               hint="Your clock style over the phone's lock. Swipe up to unlock — your PIN or fingerprint still protects the phone."
               value={settings.lockEnabled}
-              onChange={set('lockEnabled')}
+              onChange={(on) => {
+                updateSettings({ lockEnabled: on });
+                if (on) Launcher.requestNotificationPermission();
+              }}
             />
-            {settings.lockEnabled && !isDefault && (
-              <Text style={[styles.hint, { color: '#FF9F0A' }]}>Needs Lumo as your default home app to appear.</Text>
+            {settings.lockEnabled && (
+              <>
+                {!isDefault && (
+                  <Text style={[styles.hint, { color: '#FF9F0A' }]}>Needs Lumo as your default home app to appear.</Text>
+                )}
+                <LockStatusLine status={lockStatus} use24h={settings.clock24h} />
+                <Row label="Test lock screen now" onPress={() => Launcher.testLockScreen()} chevron />
+                {lockStatus && !lockStatus.canDrawOverlays && (
+                  <Row
+                    label="Allow “Display over other apps”"
+                    detail="More reliable"
+                    onPress={() => Launcher.openOverlaySettings()}
+                    chevron
+                  />
+                )}
+                {lockStatus && !lockStatus.notificationsEnabled && (
+                  <Text style={[styles.hint, { color: '#FF9F0A' }]}>
+                    Lumo notifications are off. Turn them on in Android Settings → Apps → Lumo Launcher → Notifications
+                    (used only to open the lock screen).
+                  </Text>
+                )}
+              </>
             )}
             <Toggle label="Torch & camera buttons" value={settings.lockShortcuts} onChange={set('lockShortcuts')} />
             <Row label="Lock screen clock style" detail={CLOCK_FACES.find((f) => f.key === settings.lockFace)?.name} onPress={() => setClockTarget('lock')} chevron />
@@ -438,6 +471,31 @@ export function SettingsSheet({ visible, onClose }: Props) {
       </View>
     </Modal>
   );
+}
+
+function LockStatusLine({ status, use24h }: { status: Launcher.LockScreenStatus | null; use24h: boolean }) {
+  const { palette } = useStore();
+  if (!status) return null;
+  const at = (ms: number) => {
+    const { hours, minutes, suffix } = formatTime(new Date(ms), use24h);
+    return `${hours}:${minutes}${suffix ? ` ${suffix}` : ''}`;
+  };
+  let text: string;
+  let color = palette.subtext;
+  if (!status.listening) {
+    text = 'Waiting to start — open the home screen once.';
+    color = '#FF9F0A';
+  } else if (status.lastAttempt === 0) {
+    text = 'Ready. Turn the screen off and on to see it.';
+  } else if (status.lastShown >= status.lastAttempt) {
+    const via = status.lastVia === 'notification' ? ' (via notification)' : status.lastVia === 'test' ? ' (test)' : '';
+    text = `✓ Opened at ${at(status.lastShown)}${via}`;
+    color = '#30D158';
+  } else {
+    text = `✗ Didn't open at ${at(status.lastAttempt)} — Android blocked it. Allow “Display over other apps” below.`;
+    color = '#FF453A';
+  }
+  return <Text style={[styles.hint, { color, marginTop: 6 }]}>{text}</Text>;
 }
 
 function ThemeCard({
