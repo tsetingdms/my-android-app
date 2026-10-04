@@ -1,0 +1,14 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- Pull down the notification shade from the home screen -->
+  <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
+  <!-- Let the user uninstall apps from the launcher -->
+  <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+
+  <!-- Android 11+ package visibility: see every app that has a launcher icon -->
+  <queries>
+    <intent>
+      <action android:name="android.intent.action.MAIN" />
+      <category android:name="android.intent.category.LAUNCHER" />
+    </intent>
+  </queries>
+</manifest>
