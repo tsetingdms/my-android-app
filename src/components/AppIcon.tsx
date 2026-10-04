@@ -3,7 +3,7 @@ import { memo, useMemo } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { App } from '../store';
-import { useStore } from '../store';
+import { useLook } from '../store';
 import { shapeStyle, type IconShape } from '../theme';
 
 export type IconLook = {
@@ -16,7 +16,7 @@ export type IconLook = {
 
 /** Stable icon styling derived from settings, so memoized icons skip unrelated re-renders. */
 export function useIconLook(): IconLook {
-  const { settings, palette } = useStore();
+  const { settings, palette } = useLook();
   return useMemo(
     () => ({
       shape: settings.iconShape,

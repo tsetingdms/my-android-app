@@ -12,6 +12,7 @@ import {
   StyleSheet,
   View,
   useWindowDimensions,
+  type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
@@ -30,7 +31,7 @@ import { ClockWidget } from './components/widgets/ClockWidget';
 import { GlanceRow } from './components/widgets/GlanceRow';
 import { WidgetsPage } from './components/widgets/WidgetsPage';
 import type { App } from './store';
-import { useStore } from './store';
+import { useActions, useLook } from './store';
 
 const SWIPE = 70;
 const CONTROLS_DRAG = 320;
@@ -41,7 +42,9 @@ const slideTo = (value: Animated.Value, toValue: number, duration = 220) =>
   Animated.timing(value, { toValue, duration, easing: Easing.out(Easing.cubic), useNativeDriver: true });
 
 export function Root() {
-  const { ready, settings, palette, launch } = useStore();
+  // Look + stable actions only: Root no longer re-renders on app-list / layout / launch-count changes.
+  const { ready, settings, palette } = useLook();
+  const { launch } = useActions();
   const insets = useSafeAreaInsets();
   const { width, height: windowHeight } = useWindowDimensions();
   const H = Math.max(windowHeight, Dimensions.get('screen').height);
@@ -66,6 +69,12 @@ export function Root() {
   const edgeOpenRef = useRef(false);
   const [edgeOpen, setEdgeOpen] = useState(false);
 
+  // While anything slides over the home screen, draw the home screen once into a GPU texture and
+  // only move that texture (the 3D tilt/scale then costs almost nothing on budget GPUs).
+  const [homeLayer, setHomeLayer] = useState(false);
+  // Same idea for the panel being opened/closed/dragged (off once settled, so tile animations stay cheap).
+  const [panelAnimating, setPanelAnimating] = useState(false);
+
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [target, setTarget] = useState<ActionTarget | null>(null);
   const [page, setPage] = useState(0);
@@ -79,6 +88,19 @@ export function Root() {
     return () => clearTimeout(t);
   }, []);
 
+  const overlayOpen = () => drawerOpenRef.current || cpOpenRef.current || edgeOpenRef.current;
+  const layerOffIfIdle = useCallback(() => {
+    if (!overlayOpen()) setHomeLayer(false);
+  }, []);
+  const panelMoving = useCallback(() => {
+    setHomeLayer(true);
+    setPanelAnimating(true);
+  }, []);
+  const panelSettled = useCallback(() => {
+    setPanelAnimating(false);
+    if (!overlayOpen()) setHomeLayer(false);
+  }, []);
+
   // ---------- Drawer ----------
   const openDrawer = useCallback(
     (search: boolean) => {
@@ -86,12 +108,15 @@ export function Root() {
       setFocusSearch(search);
       drawerOpenRef.current = true;
       setDrawerOpen(true);
+      setHomeLayer(true);
       springTo(y, 0).start();
     },
     [y]
   );
+  const openDrawerSearch = useCallback(() => openDrawer(true), [openDrawer]);
+  const openDrawerPlain = useCallback(() => openDrawer(false), [openDrawer]);
   const settleDrawerOpen = useCallback(() => springTo(y, 0).start(), [y]);
-  const settleDrawerClosed = useCallback(() => slideTo(y, H, 200).start(), [y, H]);
+  const settleDrawerClosed = useCallback(() => slideTo(y, H, 200).start(layerOffIfIdle), [y, H, layerOffIfIdle]);
   const closeDrawer = useCallback(
     (animated = true) => {
       drawerOpenRef.current = false;
@@ -99,52 +124,71 @@ export function Root() {
       if (animated) {
         slideTo(y, H).start(() => {
           if (!drawerOpenRef.current) setDrawerOpen(false);
+          layerOffIfIdle();
         });
       } else {
         y.setValue(H);
         setDrawerOpen(false);
+        layerOffIfIdle();
       }
     },
-    [y, H]
+    [y, H, layerOffIfIdle]
   );
+  const requestCloseDrawer = useCallback(() => closeDrawer(), [closeDrawer]);
 
   // ---------- Control panel ----------
   const openControls = useCallback(() => {
     setOverlaysReady(true);
     cpOpenRef.current = true;
     setCpOpen(true);
-    springTo(cp, 1).start();
-  }, [cp]);
-  const settleControlsOpen = useCallback(() => springTo(cp, 1).start(), [cp]);
+    panelMoving();
+    springTo(cp, 1).start(panelSettled);
+  }, [cp, panelMoving, panelSettled]);
+  const settleControlsOpen = useCallback(() => springTo(cp, 1).start(panelSettled), [cp, panelSettled]);
   const closeControls = useCallback(() => {
     cpOpenRef.current = false;
+    panelMoving();
     slideTo(cp, 0, 200).start(() => {
       if (!cpOpenRef.current) setCpOpen(false);
+      panelSettled();
     });
-  }, [cp]);
+  }, [cp, panelMoving, panelSettled]);
 
   // ---------- Edge panel ----------
   const openEdge = useCallback(() => {
     setOverlaysReady(true);
     edgeOpenRef.current = true;
     setEdgeOpen(true);
-    springTo(edge, 1).start();
-  }, [edge]);
-  const settleEdgeOpen = useCallback(() => springTo(edge, 1).start(), [edge]);
+    panelMoving();
+    springTo(edge, 1).start(panelSettled);
+  }, [edge, panelMoving, panelSettled]);
+  const settleEdgeOpen = useCallback(() => springTo(edge, 1).start(panelSettled), [edge, panelSettled]);
   const closeEdge = useCallback(
     (animated = true) => {
       edgeOpenRef.current = false;
       if (animated) {
+        panelMoving();
         slideTo(edge, 0, 200).start(() => {
           if (!edgeOpenRef.current) setEdgeOpen(false);
+          panelSettled();
         });
       } else {
         edge.setValue(0);
         setEdgeOpen(false);
+        panelSettled();
       }
     },
-    [edge]
+    [edge, panelMoving, panelSettled]
   );
+  const requestCloseEdge = useCallback(() => closeEdge(), [closeEdge]);
+  const edgeToControls = useCallback(() => {
+    closeEdge();
+    openControls();
+  }, [closeEdge, openControls]);
+  const edgeToDrawer = useCallback(() => {
+    closeEdge();
+    openDrawer(false);
+  }, [closeEdge, openDrawer]);
 
   const goToPage = useCallback(
     (p: number) => {
@@ -154,8 +198,6 @@ export function Root() {
     },
     [width]
   );
-
-  const overlayOpen = () => drawerOpenRef.current || cpOpenRef.current || edgeOpenRef.current;
 
   // Home gestures (page 1 only, nothing open): swipe up = drawer (follows the finger);
   // swipe down = control panel or notifications, depending on settings.
@@ -169,6 +211,8 @@ export function Root() {
           const { swipeDown, width: w } = prefs.current;
           downMode.current =
             swipeDown === 'notifications' || (swipeDown === 'split' && g.x0 < w / 2) ? 'notifications' : 'controls';
+          if (g.dy > 0 && downMode.current === 'controls') panelMoving();
+          else setHomeLayer(true);
         },
         onPanResponderMove: (_, g) => {
           if (g.dy < 0) {
@@ -181,16 +225,18 @@ export function Root() {
         },
         onPanResponderRelease: (_, g) => {
           if (g.dy < 0) {
+            setPanelAnimating(false);
             if (g.dy < -SWIPE || g.vy < -0.6) openDrawer(false);
             else settleDrawerClosed();
             return;
           }
-          settleDrawerClosed();
           if (downMode.current === 'controls') {
+            y.setValue(H);
             if (g.dy > SWIPE || g.vy > 0.5) openControls();
             else closeControls();
-          } else if (g.dy > SWIPE) {
-            Launcher.expandNotifications();
+          } else {
+            panelSettled();
+            if (g.dy > SWIPE) Launcher.expandNotifications();
           }
         },
         onPanResponderTerminate: () => {
@@ -199,7 +245,7 @@ export function Root() {
         },
         onPanResponderTerminationRequest: () => false,
       }),
-    [y, cp, H, openDrawer, settleDrawerClosed, openControls, closeControls]
+    [y, cp, H, openDrawer, settleDrawerClosed, openControls, closeControls, panelMoving, panelSettled]
   );
 
   const closeAll = useCallback(() => {
@@ -253,6 +299,12 @@ export function Root() {
   const onLongDrawer = useCallback((app: App) => setTarget({ app, source: 'drawer' }), []);
   const onLongEdge = useCallback((app: App) => setTarget({ app, source: 'edge' }), []);
   const openSettings = useCallback(() => setSettingsOpen(true), []);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  const closeActions = useCallback(() => setTarget(null), []);
+  const onRootLayout = useCallback(
+    (e: LayoutChangeEvent) => setScreen({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height }),
+    []
+  );
 
   const onPageScrollEnd = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -286,14 +338,15 @@ export function Root() {
 
   return (
     <ScreenSizeContext.Provider value={screen}>
-      <View
-        style={styles.root}
-        onLayout={(e) => setScreen({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })}
-      >
+      <View style={styles.root} onLayout={onRootLayout}>
         <StatusBar style={palette.dark ? 'light' : 'dark'} />
         <Wallpaper />
 
-        <Animated.View {...homePan.panHandlers} style={[styles.root, homeStyle]}>
+        <Animated.View
+          {...homePan.panHandlers}
+          renderToHardwareTextureAndroid={homeLayer}
+          style={[styles.root, homeStyle]}
+        >
           <ScrollView
             ref={pagerRef}
             horizontal
@@ -317,13 +370,19 @@ export function Root() {
 
           <View style={{ paddingBottom: insets.bottom + 10, paddingTop: 6 }}>
             <PageDots page={page} count={2} />
-            {settings.showSearch && <SearchPill onPress={() => openDrawer(true)} onOpenDrawer={() => openDrawer(false)} />}
+            {settings.showSearch && <SearchPill onPress={openDrawerSearch} onOpenDrawer={openDrawerPlain} />}
             <Dock look={look} onPress={onLaunchHome} onLongPress={onLongDock} />
           </View>
         </Animated.View>
 
         {settings.edgePanel && (
-          <EdgeHandle progress={edge} position={settings.edgeHandle} onOpen={openEdge} onClose={() => closeEdge()} />
+          <EdgeHandle
+            progress={edge}
+            position={settings.edgeHandle}
+            onDragStart={panelMoving}
+            onOpen={openEdge}
+            onClose={requestCloseEdge}
+          />
         )}
 
         <AppDrawer
@@ -334,35 +393,38 @@ export function Root() {
           onLaunch={onLaunchDrawer}
           onLongPressApp={onLongDrawer}
           onOpenSettings={openSettings}
-          onRequestClose={closeDrawer}
+          onRequestClose={requestCloseDrawer}
           onSettle={settleDrawerOpen}
         />
 
         {overlaysReady && (
-          <ControlPanel progress={cp} open={cpOpen} onClose={closeControls} onSettle={settleControlsOpen} />
+          <ControlPanel
+            progress={cp}
+            open={cpOpen}
+            animating={panelAnimating}
+            onDragStart={panelMoving}
+            onClose={closeControls}
+            onSettle={settleControlsOpen}
+          />
         )}
 
         {overlaysReady && settings.edgePanel && (
           <EdgePanel
             progress={edge}
             open={edgeOpen}
-            onClose={() => closeEdge()}
+            animating={panelAnimating}
+            onDragStart={panelMoving}
+            onClose={requestCloseEdge}
             onSettle={settleEdgeOpen}
             onLaunch={onLaunchEdge}
             onLongPressApp={onLongEdge}
-            onOpenControls={() => {
-              closeEdge();
-              openControls();
-            }}
-            onOpenDrawer={() => {
-              closeEdge();
-              openDrawer(false);
-            }}
+            onOpenControls={edgeToControls}
+            onOpenDrawer={edgeToDrawer}
           />
         )}
 
-        <ActionsSheet target={target} onClose={() => setTarget(null)} />
-        <SettingsSheet visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        <ActionsSheet target={target} onClose={closeActions} />
+        <SettingsSheet visible={settingsOpen} onClose={closeSettings} />
       </View>
     </ScreenSizeContext.Provider>
   );

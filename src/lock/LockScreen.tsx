@@ -20,7 +20,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import * as Launcher from '../../modules/launcher';
 import { ClockFace, resolveClockColor } from '../components/ClockFace';
 import { useMinuteClock } from '../hooks';
-import { KEYS } from '../store';
+import { KEYS, lastKnownSettings } from '../store';
 import { DEFAULT_SETTINGS, GRADIENTS, makePalette, wallpaperImage, type Settings } from '../theme';
 
 /** Root of the "lock" surface hosted by LockScreenActivity (shown over Android's own lock). */
@@ -37,16 +37,18 @@ function LockScreen() {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const now = useMinuteClock();
-  const [settings, setSettings] = useState<Settings | null>(null);
-  const [torch, setTorch] = useState(false);
+  // Settings already in memory (the launcher is running) let the first frame be the real lock screen.
+  const [settings, setSettings] = useState<Settings | null>(lastKnownSettings);
+  const [torch, setTorch] = useState(Launcher.isTorchOn);
   const offset = useRef(new Animated.Value(0)).current;
   const hint = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    AsyncStorage.getItem(KEYS.settings)
-      .then((raw) => setSettings({ ...DEFAULT_SETTINGS, ...(raw ? JSON.parse(raw) : {}) }))
-      .catch(() => setSettings(DEFAULT_SETTINGS));
-    setTorch(Launcher.getSystemState().torch);
+    if (!lastKnownSettings()) {
+      AsyncStorage.getItem(KEYS.settings)
+        .then((raw) => setSettings({ ...DEFAULT_SETTINGS, ...(raw ? JSON.parse(raw) : {}) }))
+        .catch(() => setSettings(DEFAULT_SETTINGS));
+    }
     return Launcher.addTorchListener(setTorch);
   }, []);
 
@@ -86,6 +88,14 @@ function LockScreen() {
     [offset, height]
   );
 
+  const { fade, hintY } = useMemo(
+    () => ({
+      fade: offset.interpolate({ inputRange: [-height * 0.4, 0], outputRange: [0, 1], extrapolate: 'clamp' }),
+      hintY: hint.interpolate({ inputRange: [0, 1], outputRange: [0, -6] }),
+    }),
+    [offset, hint, height]
+  );
+
   if (!settings) return <StatusBar style="light" />;
 
   const dark = settings.theme === 'auto' ? scheme !== 'light' : settings.theme === 'dark';
@@ -94,8 +104,6 @@ function LockScreen() {
   const gradient = image ? undefined : GRADIENTS[settings.wallpaper];
   const color = resolveClockColor(settings.lockColor, palette);
   const face = settings.lockFace === 'minimal' ? 'large' : settings.lockFace;
-  const fade = offset.interpolate({ inputRange: [-height * 0.4, 0], outputRange: [0, 1], extrapolate: 'clamp' });
-  const hintY = hint.interpolate({ inputRange: [0, 1], outputRange: [0, -6] });
   const buttonBg = 'rgba(0,0,0,0.28)';
 
   return (

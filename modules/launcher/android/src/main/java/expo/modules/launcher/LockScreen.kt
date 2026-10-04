@@ -35,6 +35,8 @@ import java.lang.ref.WeakReference
  *     granted "Display over other apps");
  *  2. if nothing opened shortly after, a full-screen-intent notification — the mechanism alarm
  *     clocks use to appear over the lock screen. The notification is removed as soon as it opens.
+ *     Once a phone is seen blocking the direct start, the notification is posted right away on
+ *     the next screen-off instead of waiting to find out again (much faster on such phones).
  * The last attempt is recorded so Customize can show whether it worked.
  */
 internal object LockScreen {
@@ -43,6 +45,7 @@ internal object LockScreen {
   private const val KEY_LAST_ATTEMPT = "last_attempt"
   private const val KEY_LAST_SHOWN = "last_shown"
   private const val KEY_LAST_VIA = "last_via"
+  private const val KEY_DIRECT_BLOCKED = "direct_blocked"
   private const val CHANNEL_ID = "lumo_lock_screen"
   private const val NOTIFICATION_ID = 7071
   private const val FALLBACK_DELAY_MS = 600L
@@ -103,15 +106,25 @@ internal object LockScreen {
     }
     val app = context.applicationContext
     val attempt = System.currentTimeMillis()
-    prefs(app).edit().putLong(KEY_LAST_ATTEMPT, attempt).apply()
+    val p = prefs(app)
+    p.edit().putLong(KEY_LAST_ATTEMPT, attempt).apply()
     try {
       app.startActivity(activityIntent(app, "direct"))
     } catch (e: Exception) {
       // Fall through to the notification below.
     }
+    // Known to be blocked here (and no "Display over other apps"): don't wait, notify now.
+    // If the direct start works after all, the activity is single-instance, so nothing doubles up.
+    if (p.getBoolean(KEY_DIRECT_BLOCKED, false) && !Settings.canDrawOverlays(app)) {
+      showViaNotification(app)
+      return
+    }
     // A blocked background start fails silently, so check whether the screen actually opened.
     main.postDelayed({
-      if (!LockScreenActivity.isShowing && lastShown(app) < attempt) showViaNotification(app)
+      if (!LockScreenActivity.isShowing && lastShown(app) < attempt) {
+        prefs(app).edit().putBoolean(KEY_DIRECT_BLOCKED, true).apply()
+        showViaNotification(app)
+      }
     }, FALLBACK_DELAY_MS)
   }
 
@@ -126,7 +139,10 @@ internal object LockScreen {
   }
 
   fun markShown(context: Context, via: String) {
-    prefs(context).edit().putLong(KEY_LAST_SHOWN, System.currentTimeMillis()).putString(KEY_LAST_VIA, via).apply()
+    val edit = prefs(context).edit().putLong(KEY_LAST_SHOWN, System.currentTimeMillis()).putString(KEY_LAST_VIA, via)
+    // A direct start worked (e.g. after "Display over other apps" was allowed): use it again next time.
+    if (via == "direct") edit.putBoolean(KEY_DIRECT_BLOCKED, false)
+    edit.apply()
     try {
       (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFICATION_ID)
     } catch (e: Exception) {

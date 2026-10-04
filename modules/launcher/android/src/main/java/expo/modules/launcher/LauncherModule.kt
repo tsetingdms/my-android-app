@@ -118,6 +118,9 @@ class LauncherModule : Module() {
       expandNotifications()
     }
 
+    // Cached flag kept current by the torch callback: cheap enough to call while a panel animates.
+    Function("isTorchOn") { SystemControls.torchOn }
+
     Function("setTorch") { on: Boolean ->
       SystemControls.setTorch(context, on)
     }

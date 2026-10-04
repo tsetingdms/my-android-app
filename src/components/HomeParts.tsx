@@ -1,10 +1,10 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { AppState, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import * as Launcher from '../../modules/launcher';
 import type { App } from '../store';
-import { useStore } from '../store';
+import { useLook, useStore } from '../store';
 import { AppIcon, type IconLook } from './AppIcon';
 import { Glass, GlassButton } from './Glass';
 
@@ -17,7 +17,7 @@ type AppHandlers = {
 export const DOCK_LIMIT = 5;
 
 /** Pinned apps on the home screen, laid out in rows. */
-export function HomeGrid({ look, onPress, onLongPress }: AppHandlers) {
+export const HomeGrid = memo(function HomeGrid({ look, onPress, onLongPress }: AppHandlers) {
   const { layout, appsByKey, settings, palette } = useStore();
   const { width } = useWindowDimensions();
   const apps = layout.home.map((k) => appsByKey.get(k)).filter((a): a is App => !!a);
@@ -52,10 +52,10 @@ export function HomeGrid({ look, onPress, onLongPress }: AppHandlers) {
       ))}
     </View>
   );
-}
+});
 
 /** Glass dock with favourite apps (no labels). */
-export function Dock({ look, onPress, onLongPress }: AppHandlers) {
+export const Dock = memo(function Dock({ look, onPress, onLongPress }: AppHandlers) {
   const { layout, appsByKey, settings, palette } = useStore();
   const { width } = useWindowDimensions();
   const apps = layout.dock
@@ -89,10 +89,10 @@ export function Dock({ look, onPress, onLongPress }: AppHandlers) {
       )}
     </Glass>
   );
-}
+});
 
-export function SearchPill({ onPress, onOpenDrawer }: { onPress: () => void; onOpenDrawer: () => void }) {
-  const { palette } = useStore();
+export const SearchPill = memo(function SearchPill({ onPress, onOpenDrawer }: { onPress: () => void; onOpenDrawer: () => void }) {
+  const { palette } = useLook();
   return (
     <View style={styles.searchRow}>
       <GlassButton radius={24} style={styles.searchPill} onPress={onPress} frosted>
@@ -101,18 +101,18 @@ export function SearchPill({ onPress, onOpenDrawer }: { onPress: () => void; onO
           <Text style={[styles.searchText, { color: palette.subtext }]}>Search apps</Text>
         </View>
       </GlassButton>
-      <GlassButton radius={24} style={styles.appsButton} onPress={onOpenDrawer} frosted>
+      <GlassButton radius={24} style={styles.appsButton} onPress={onOpenDrawer} frosted highlight={false}>
         <View style={styles.appsInner}>
           <Ionicons name="apps" size={18} color={palette.text} />
         </View>
       </GlassButton>
     </View>
   );
-}
+});
 
 /** Shown until Lumo is the default home app. */
-export function DefaultLauncherBanner() {
-  const { palette } = useStore();
+export const DefaultLauncherBanner = memo(function DefaultLauncherBanner() {
+  const { palette } = useLook();
   const [show, setShow] = useState(false);
   const [dismissed, setDismissed] = useState(false);
 
@@ -136,10 +136,10 @@ export function DefaultLauncherBanner() {
       </View>
     </GlassButton>
   );
-}
+});
 
-export function PageDots({ page, count }: { page: number; count: number }) {
-  const { palette } = useStore();
+export const PageDots = memo(function PageDots({ page, count }: { page: number; count: number }) {
+  const { palette } = useLook();
   return (
     <View style={styles.dots}>
       {Array.from({ length: count }, (_, i) => (
@@ -154,7 +154,7 @@ export function PageDots({ page, count }: { page: number; count: number }) {
       ))}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   grid: {

@@ -35,6 +35,11 @@ export const KEYS = {
   apps: 'lumo.apps.v1',
 };
 
+// The lock screen runs in the same JS runtime as the launcher, so it can start from the settings
+// already in memory instead of waiting for a storage read.
+let lastSettings: Settings | null = null;
+export const lastKnownSettings = (): Settings | null => lastSettings;
+
 // Rendered once natively and cached on disk; sized for the screen density.
 const ICON_PX = Math.min(192, Math.max(96, Math.round(PixelRatio.get() * 64)));
 
@@ -53,11 +58,31 @@ type StoreValue = {
   palette: Palette;
 };
 
-const StoreContext = createContext<StoreValue | null>(null);
+type LookValue = Pick<StoreValue, 'ready' | 'settings' | 'palette' | 'updateSettings' | 'resetSettings'>;
+type ActionsValue = Pick<StoreValue, 'updateSettings' | 'resetSettings' | 'updateLayout' | 'refreshApps' | 'launch'>;
 
+const StoreContext = createContext<StoreValue | null>(null);
+const LookContext = createContext<LookValue | null>(null);
+const ActionsContext = createContext<ActionsValue | null>(null);
+
+/** Everything. Re-renders on any change (apps, layout, launch counts…) — use only where needed. */
 export function useStore(): StoreValue {
   const value = useContext(StoreContext);
   if (!value) throw new Error('useStore must be used inside <StoreProvider>');
+  return value;
+}
+
+/** Settings + palette only: for visual components, so they skip app-list / layout updates. */
+export function useLook(): LookValue {
+  const value = useContext(LookContext);
+  if (!value) throw new Error('useLook must be used inside <StoreProvider>');
+  return value;
+}
+
+/** Stable action functions; never causes a re-render. */
+export function useActions(): ActionsValue {
+  const value = useContext(ActionsContext);
+  if (!value) throw new Error('useActions must be used inside <StoreProvider>');
   return value;
 }
 
@@ -222,6 +247,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (ready) Launcher.setLockScreenEnabled(settings.lockEnabled);
   }, [ready, settings.lockEnabled]);
 
+  useEffect(() => {
+    if (ready) lastSettings = settings;
+  }, [ready, settings]);
+
   const appsByKey = useMemo(() => new Map(apps.map((a) => [a.key, a])), [apps]);
 
   const updateSettings = useCallback((patch: Partial<Settings>) => {
@@ -267,5 +296,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [ready, settings, updateSettings, resetSettings, layout, updateLayout, apps, appsByKey, appsLoading, refreshApps, launch, palette]
   );
 
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  const look = useMemo<LookValue>(
+    () => ({ ready, settings, palette, updateSettings, resetSettings }),
+    [ready, settings, palette, updateSettings, resetSettings]
+  );
+  const actions = useMemo<ActionsValue>(
+    () => ({ updateSettings, resetSettings, updateLayout, refreshApps, launch }),
+    [updateSettings, resetSettings, updateLayout, refreshApps, launch]
+  );
+
+  return (
+    <ActionsContext.Provider value={actions}>
+      <LookContext.Provider value={look}>
+        <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
+      </LookContext.Provider>
+    </ActionsContext.Provider>
+  );
 }

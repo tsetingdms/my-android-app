@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from 'react';
+import { memo, useMemo, useRef, type ReactNode } from 'react';
 import {
   Animated,
   Pressable,
@@ -26,12 +26,22 @@ const spring = (value: Animated.Value, toValue: number, bounciness = 6) =>
  * Press feedback like the Honor control centre: the tile tilts in 3D toward the finger,
  * shrinks a little and glows, then springs back. Native-driver animations, so it stays smooth.
  */
-export function Tilt({ children, style, onPress, onLongPress, max = 10, radius = 24 }: Props) {
+export const Tilt = memo(function Tilt({ children, style, onPress, onLongPress, max = 10, radius = 24 }: Props) {
   const rx = useRef(new Animated.Value(0)).current;
   const ry = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(1)).current;
   const glow = useRef(new Animated.Value(0)).current;
   const size = useRef({ w: 1, h: 1 });
+  // Built once: new interpolation nodes on every render would churn the native animation graph.
+  const transform = useMemo(
+    () => [
+      { perspective: 700 },
+      { rotateX: rx.interpolate({ inputRange: [-45, 45], outputRange: ['-45deg', '45deg'] }) },
+      { rotateY: ry.interpolate({ inputRange: [-45, 45], outputRange: ['-45deg', '45deg'] }) },
+      { scale },
+    ],
+    [rx, ry, scale]
+  );
 
   const onLayout = (e: LayoutChangeEvent) => {
     size.current = { w: Math.max(1, e.nativeEvent.layout.width), h: Math.max(1, e.nativeEvent.layout.height) };
@@ -67,19 +77,7 @@ export function Tilt({ children, style, onPress, onLongPress, max = 10, radius =
       onLayout={onLayout}
       style={style}
     >
-      <Animated.View
-        style={[
-          styles.fill,
-          {
-            transform: [
-              { perspective: 700 },
-              { rotateX: rx.interpolate({ inputRange: [-45, 45], outputRange: ['-45deg', '45deg'] }) },
-              { rotateY: ry.interpolate({ inputRange: [-45, 45], outputRange: ['-45deg', '45deg'] }) },
-              { scale },
-            ],
-          },
-        ]}
-      >
+      <Animated.View style={[styles.fill, { transform }]}>
         {children}
         <Animated.View
           pointerEvents="none"
@@ -88,7 +86,7 @@ export function Tilt({ children, style, onPress, onLongPress, max = 10, radius =
       </Animated.View>
     </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
   fill: {

@@ -1,9 +1,10 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { memo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import * as Launcher from '../../../modules/launcher';
 import { MONTHS, useBattery, useMinuteClock, WEEKDAYS } from '../../hooks';
-import { useStore } from '../../store';
+import { useLook } from '../../store';
 import { GlassButton } from '../Glass';
 
 export function batteryIcon(level: number, charging: boolean): keyof typeof Ionicons.glyphMap {
@@ -14,8 +15,8 @@ export function batteryIcon(level: number, charging: boolean): keyof typeof Ioni
 }
 
 /** Two compact glass cards: battery and today's date. */
-export function GlanceRow() {
-  const { palette } = useStore();
+export const GlanceRow = memo(function GlanceRow() {
+  const { palette } = useLook();
   const battery = useBattery();
   const now = useMinuteClock();
   const level = Math.max(0, battery.level);
@@ -58,7 +59,7 @@ export function GlanceRow() {
       </GlassButton>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   row: {

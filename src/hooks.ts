@@ -29,10 +29,16 @@ function usePolled<T>(read: () => T | Promise<T>, initial: T, everyMs: number): 
   const [value, setValue] = useState<T>(initial);
   useEffect(() => {
     let alive = true;
+    let last = '';
     const update = async () => {
       try {
         const v = await read();
-        if (alive) setValue(v);
+        // Skip the re-render when the reading hasn't changed (the common case).
+        const json = JSON.stringify(v);
+        if (alive && json !== last) {
+          last = json;
+          setValue(v);
+        }
       } catch {
         // Ignore transient failures.
       }

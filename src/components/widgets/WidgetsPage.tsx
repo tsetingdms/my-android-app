@@ -1,13 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import * as Launcher from '../../../modules/launcher';
 import type { SettingsPanel } from '../../../modules/launcher';
 import { formatBytes, greeting, MONTHS, useBattery, useDeviceStats, useMinuteClock } from '../../hooks';
-import { useStore } from '../../store';
+import { useLook } from '../../store';
 import { Glass, GlassButton } from '../Glass';
 import { batteryIcon } from './GlanceRow';
 
@@ -18,8 +18,8 @@ type Props = {
 };
 
 /** Second home page: a scrollable stack of widgets. */
-export function WidgetsPage({ width, bottomInset, onOpenSettings }: Props) {
-  const { palette } = useStore();
+export const WidgetsPage = memo(function WidgetsPage({ width, bottomInset, onOpenSettings }: Props) {
+  const { palette } = useLook();
   const insets = useSafeAreaInsets();
   const now = useMinuteClock();
   const shadow = palette.dark ? styles.shadow : null;
@@ -47,7 +47,7 @@ export function WidgetsPage({ width, bottomInset, onOpenSettings }: Props) {
       </GlassButton>
     </ScrollView>
   );
-}
+});
 
 const TILES: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap; panel?: SettingsPanel }[] = [
   { key: 'torch', label: 'Torch', icon: 'flashlight' },
@@ -59,7 +59,7 @@ const TILES: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap;
 ];
 
 function QuickTiles() {
-  const { palette } = useStore();
+  const { palette } = useLook();
   const [torch, setTorch] = useState(false);
 
   return (
@@ -94,7 +94,7 @@ function QuickTiles() {
 }
 
 function Meter({ label, value, detail, color }: { label: string; value: number; detail: string; color: string }) {
-  const { palette } = useStore();
+  const { palette } = useLook();
   const pct = Math.round(Math.min(1, Math.max(0, value)) * 100);
   return (
     <View style={styles.meter}>
@@ -110,7 +110,7 @@ function Meter({ label, value, detail, color }: { label: string; value: number; 
 }
 
 function DeviceCard() {
-  const { palette } = useStore();
+  const { palette } = useLook();
   const battery = useBattery();
   const stats = useDeviceStats();
   const ramUsed = stats ? stats.ramTotal - stats.ramAvailable : 0;
@@ -155,7 +155,7 @@ function DeviceCard() {
 }
 
 function CalendarCard() {
-  const { palette } = useStore();
+  const { palette } = useLook();
   const now = useMinuteClock();
   const year = now.getFullYear();
   const month = now.getMonth();
@@ -210,7 +210,7 @@ function CalendarCard() {
 const NOTE_KEY = 'lumo.note.v1';
 
 function NoteCard() {
-  const { palette } = useStore();
+  const { palette } = useLook();
   const [text, setText] = useState('');
   const loaded = useRef(false);
 

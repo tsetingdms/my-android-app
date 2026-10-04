@@ -3,7 +3,7 @@
 Android home-screen launcher for budget phones (target device: **Moto E40**, Android 11, 720×1600, Unisoc T700, 4 GB RAM).
 Expo SDK 57 (React Native 0.86, New Architecture, Hermes) + TypeScript, plus a local Kotlin Expo module.
 Everything is stored on the phone (AsyncStorage); there is no backend, no account and no network use.
-App version lives in `app.json` (`expo.version` 1.1.1, `android.versionCode` 3).
+App version lives in `app.json` (`expo.version` 1.1.2, `android.versionCode` 4).
 
 ## Repo & branches
 
@@ -47,9 +47,12 @@ node scripts/generate-wallpapers.mjs     # regenerate theme wallpapers in assets
   (`edge`: 0–1). Home gestures: swipe up = drawer, swipe down = control panel / notifications / split (setting
   `swipeDown`). The home content recedes behind overlays (the edge panel tilts it back in 3D). Also Back/Home button
   handling, the long-press sheet, Customize, and `ScreenSizeContext` (root size, for frosted glass).
-- `src/store.tsx` — single React context: `settings` (look), `layout` (home / dock / edge / hidden / launch counts),
-  installed `apps`, derived `palette`. Persists to AsyncStorage with a debounce, seeds dock/home on first run, prunes
-  uninstalled apps, and syncs `settings.lockEnabled` to native. Exports `KEYS` (used by the lock screen).
+- `src/store.tsx` — the store: `settings` (look), `layout` (home / dock / edge / hidden / launch counts), installed
+  `apps`, derived `palette`. Three contexts: `useStore()` (everything), `useLook()` (ready / settings / palette — use
+  it in anything that doesn't need apps or layout, so launch counts and app-list changes don't re-render it) and
+  `useActions()` (stable callbacks only). Persists to AsyncStorage with a debounce, seeds dock/home on first run, prunes
+  uninstalled apps, and syncs `settings.lockEnabled` to native. Exports `KEYS` and `lastKnownSettings()` (both used by
+  the lock screen).
 - `src/theme.ts` — `Settings` type + `DEFAULT_SETTINGS`, accents, gradient wallpapers, `WALLPAPER_IMAGES` (theme art,
   `wallpaper: 'img:<id>'`; `'photo'` uses `photoUri`; `'system'` = phone wallpaper), `wallpaperImage()`, `THEMES`
   (one-tap presets = settings patches), `CLOCK_FACES`, `CLOCK_COLORS`, icon shapes, `makePalette()` (glass colors per
@@ -106,14 +109,23 @@ node scripts/generate-wallpapers.mjs     # regenerate theme wallpapers in assets
   legacy icons are wrapped on a white plate. Themed icons use the Android 13 monochrome layer, falling back to the
   foreground layer (needed on the Android 11 target). `ICON_PX` in `store.tsx` is density-based (128 px on the E40).
 - **Glass & blur are never real-time** (too slow on low-end GPUs; don't add `expo-blur`). `Glass` = translucent tint +
-  diagonal `LinearGradient` sheen + rim border + 1px top highlight. Picture wallpapers are blurred once at decode
+  diagonal `LinearGradient` sheen + rim border + a soft 1px top "edge shine" (a horizontal gradient that fades out at
+  the corners; setting `glassEdge`, off per instance with `highlight={false}` on round buttons). Picture wallpapers are blurred once at decode
   (`Image blurRadius`, cached by the image pipeline); frosted `Glass` measures its window position and shows an offset
   copy of that blurred image, and overlays use `PanelBackdrop`. The phone wallpaper ("Phone") can't be read on modern
   Android, so it only gets a tint.
 - **Performance rules** (low-end target): memoized `AppIcon` gets a stable `look` object and stable callbacks; the
   drawer list mounts ~1.2 s after start and the control/edge panels ~1.5 s after (`overlaysReady`); the app list only
   re-renders when its JSON changes; animations use `useNativeDriver: true` and interpolations are memoized; the control
-  panel polls system state every 2 s only while open; launch counts update after the app-open transition.
+  panel polls system state every 2 s only while open (first read ~380 ms after opening, re-render only on change);
+  launch counts update after the app-open transition; `usePolled` skips unchanged readings.
+  While an overlay opens/closes/is dragged, `Root` sets `renderToHardwareTextureAndroid` on the home view
+  (`homeLayer`, stays on while an overlay is open) and on the moving panel (`panelAnimating` → `animating` prop, off
+  once settled) so the GPU only moves textures; panel/handle drags report `onDragStart`. Root's children are
+  `React.memo` and get `useCallback` handlers — keep it that way (no inline lambdas/objects as props). Customize
+  (`SettingsSheet`) mounts in stages (`stage` 0 → 1 at 350 ms → 2 at 650 ms after opening) and the themes row is a
+  lazy `FlatList`; heavy new sections belong in a later stage. The edge panel and lock screen read the torch with the
+  cheap `isTorchOn()`, not `getSystemState()`.
 - **Gestures**: the home `PanResponder` claims vertical moves in the *capture* phase only on page 0 and only when no
   overlay is open, so the widgets page can scroll. The edge handle sits outside the home view so it isn't stolen.
   The drawer uses react-native-gesture-handler: a `Pan` running simultaneously with the list's `Gesture.Native()`
@@ -124,7 +136,9 @@ node scripts/generate-wallpapers.mjs     # regenerate theme wallpapers in assets
   direct background start (allowed when "Display over other apps" is granted, and for the home app on some Android
   builds — **not** on the Moto E40); if `LockScreenActivity` hasn't opened within 600 ms it posts a silent
   full-screen-intent notification (channel `lumo_lock_screen`, the alarm-clock mechanism), which the activity cancels
-  as it opens. Every attempt/open is recorded (`LockScreen.status()` → Customize shows "✓ Opened / ✗ Didn't open",
+  as it opens. That outcome is remembered (`direct_blocked` pref): on later screen-offs the notification is posted
+  immediately (no 600 ms wait) until a direct start works again or overlay access is granted. The `lock` component
+  starts from `lastKnownSettings()` (same JS runtime) and only reads AsyncStorage when the launcher isn't loaded. Every attempt/open is recorded (`LockScreen.status()` → Customize shows "✓ Opened / ✗ Didn't open",
   plus "Test lock screen now"). It never covers a call or ringing, finishes when a secure keyguard is unlocked by
   fingerprint/face (USER_PRESENT), and finishes in `onStop` only if the screen is on (screen-off must not kill it).
   Both React surfaces share one JS runtime, so the main app's `BackHandler` also receives Back presses from it.

@@ -1,8 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   AppState,
+  FlatList,
   Image,
   Modal,
   PixelRatio,
@@ -19,7 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Launcher from '../../modules/launcher';
 import { formatTime, useMinuteClock } from '../hooks';
 import type { App } from '../store';
-import { useStore } from '../store';
+import { useLook, useStore } from '../store';
 import {
   ACCENTS,
   CLOCK_COLORS,
@@ -44,7 +45,7 @@ import { Glass, GlassButton } from './Glass';
 
 type Props = { visible: boolean; onClose: () => void };
 
-export function SettingsSheet({ visible, onClose }: Props) {
+export const SettingsSheet = memo(function SettingsSheet({ visible, onClose }: Props) {
   const { settings, updateSettings, resetSettings, palette, layout, updateLayout, appsByKey, refreshApps } = useStore();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -54,6 +55,22 @@ export function SettingsSheet({ visible, onClose }: Props) {
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [lockStatus, setLockStatus] = useState<Launcher.LockScreenStatus | null>(null);
   const refreshLock = useCallback(() => setLockStatus(Launcher.getLockScreenStatus()), []);
+  // Customize mounts in steps so it opens at once on slow phones: the top sections first, the
+  // picture-heavy pickers once the slide-in is done, then the long list of options.
+  const [stage, setStage] = useState(0);
+
+  useEffect(() => {
+    if (!visible) {
+      setStage(0);
+      return;
+    }
+    const a = setTimeout(() => setStage(1), 350);
+    const b = setTimeout(() => setStage(2), 650);
+    return () => {
+      clearTimeout(a);
+      clearTimeout(b);
+    };
+  }, [visible]);
 
   // Lock-screen diagnostics: refresh while Customize is open (e.g. after turning the screen off and on).
   useEffect(() => {
@@ -75,7 +92,11 @@ export function SettingsSheet({ visible, onClose }: Props) {
   const set = <K extends keyof Settings>(key: K) => (value: Settings[K]) => updateSettings({ [key]: value } as Partial<Settings>);
   const setWallpaper = (wallpaper: string) => updateSettings({ wallpaper, themeId: null });
   const hiddenApps = layout.hidden.map((k) => appsByKey.get(k)).filter((a): a is App => !!a);
-  const previewApps = [...layout.home, ...layout.dock].map((k) => appsByKey.get(k)).filter((a): a is App => !!a);
+  const previewApps = useMemo(
+    () => [...layout.home, ...layout.dock].map((k) => appsByKey.get(k)).filter((a): a is App => !!a),
+    [layout.home, layout.dock, appsByKey]
+  );
+  const applyTheme = useCallback((t: ThemePreset) => updateSettings({ ...t.patch, themeId: t.id }), [updateSettings]);
   const contentWidth = width - 32 - 32;
   const pictureWallpaper = wallpaperImage(settings) != null;
 
@@ -124,18 +145,27 @@ export function SettingsSheet({ visible, onClose }: Props) {
             <Text style={[styles.hint, { marginBottom: 10, color: palette.subtext }]}>
               One tap sets the wallpaper, colors, glass, icons and clocks.
             </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.themes}>
-              {THEMES.map((t) => (
+            {/* Lazy list: only the cards on screen are built first, the rest follow in small batches. */}
+            <FlatList
+              horizontal
+              data={THEMES}
+              keyExtractor={themeKey}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.themes}
+              ItemSeparatorComponent={ThemeGap}
+              initialNumToRender={3}
+              maxToRenderPerBatch={2}
+              windowSize={5}
+              renderItem={({ item }) => (
                 <ThemeCard
-                  key={t.id}
-                  preset={t}
+                  preset={item}
                   apps={previewApps}
                   now={now}
-                  selected={settings.themeId === t.id}
-                  onPress={() => updateSettings({ ...t.patch, themeId: t.id })}
+                  selected={settings.themeId === item.id}
+                  onSelect={applyTheme}
                 />
-              ))}
-            </ScrollView>
+              )}
+            />
           </Section>
 
           <Section title="Look & feel" icon="sparkles-outline">
@@ -160,6 +190,12 @@ export function SettingsSheet({ visible, onClose }: Props) {
                 { value: 'solid', label: 'Solid' },
               ]}
             />
+            <Toggle
+              label="Glass edge shine"
+              hint="A soft light reflection along the top of glass boxes"
+              value={settings.glassEdge}
+              onChange={set('glassEdge')}
+            />
             <Label text="Accent color" />
             <View style={styles.swatches}>
               <Pressable
@@ -180,301 +216,310 @@ export function SettingsSheet({ visible, onClose }: Props) {
             </View>
           </Section>
 
-          <Section title="Wallpaper" icon="image-outline">
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.walls}>
-              <WallTile selected={settings.wallpaper === 'system'} name="Phone" onPress={() => setWallpaper('system')}>
-                <View style={[styles.wallFill, styles.center, { backgroundColor: palette.chipBg }]}>
-                  <Ionicons name="phone-portrait-outline" size={22} color={palette.text} />
-                </View>
-              </WallTile>
-              <WallTile selected={settings.wallpaper === 'photo'} name="My photo" onPress={pickPhoto}>
-                {settings.photoUri ? (
-                  <Image source={{ uri: settings.photoUri }} style={styles.wallFill} resizeMode="cover" resizeMethod="resize" />
-                ) : (
-                  <View style={[styles.wallFill, styles.center, { backgroundColor: palette.chipBg }]}>
-                    <Ionicons name="images-outline" size={22} color={palette.text} />
-                  </View>
+          {stage >= 1 && (
+            <>
+              <Section title="Wallpaper" icon="image-outline">
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.walls}>
+                  <WallTile selected={settings.wallpaper === 'system'} name="Phone" onPress={() => setWallpaper('system')}>
+                    <View style={[styles.wallFill, styles.center, { backgroundColor: palette.chipBg }]}>
+                      <Ionicons name="phone-portrait-outline" size={22} color={palette.text} />
+                    </View>
+                  </WallTile>
+                  <WallTile selected={settings.wallpaper === 'photo'} name="My photo" onPress={pickPhoto}>
+                    {settings.photoUri ? (
+                      <Image source={{ uri: settings.photoUri }} style={styles.wallFill} resizeMode="cover" resizeMethod="resize" />
+                    ) : (
+                      <View style={[styles.wallFill, styles.center, { backgroundColor: palette.chipBg }]}>
+                        <Ionicons name="images-outline" size={22} color={palette.text} />
+                      </View>
+                    )}
+                  </WallTile>
+                  {Object.entries(WALLPAPER_IMAGES).map(([key, w]) => (
+                    <WallTile key={key} selected={settings.wallpaper === `img:${key}`} name={w.name} onPress={() => setWallpaper(`img:${key}`)}>
+                      <Image source={w.source} style={styles.wallFill} resizeMode="cover" resizeMethod="resize" />
+                    </WallTile>
+                  ))}
+                  {Object.entries(GRADIENTS).map(([key, g]) => (
+                    <WallTile key={key} selected={settings.wallpaper === key} name={g.name} onPress={() => setWallpaper(key)}>
+                      <LinearGradient colors={g.colors} start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }} style={styles.wallFill} />
+                    </WallTile>
+                  ))}
+                </ScrollView>
+                {photoError ? <Text style={[styles.hint, { color: '#FF453A' }]}>{photoError}</Text> : null}
+                {settings.wallpaper === 'photo' && (
+                  <Row label="Choose another photo" onPress={pickPhoto} chevron />
                 )}
-              </WallTile>
-              {Object.entries(WALLPAPER_IMAGES).map(([key, w]) => (
-                <WallTile key={key} selected={settings.wallpaper === `img:${key}`} name={w.name} onPress={() => setWallpaper(`img:${key}`)}>
-                  <Image source={w.source} style={styles.wallFill} resizeMode="cover" resizeMethod="resize" />
-                </WallTile>
-              ))}
-              {Object.entries(GRADIENTS).map(([key, g]) => (
-                <WallTile key={key} selected={settings.wallpaper === key} name={g.name} onPress={() => setWallpaper(key)}>
-                  <LinearGradient colors={g.colors} start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }} style={styles.wallFill} />
-                </WallTile>
-              ))}
-            </ScrollView>
-            {photoError ? <Text style={[styles.hint, { color: '#FF453A' }]}>{photoError}</Text> : null}
-            {settings.wallpaper === 'photo' && (
-              <Row label="Choose another photo" onPress={pickPhoto} chevron />
-            )}
-            {settings.wallpaper === 'system' && (
-              <Row label="Change phone wallpaper" onPress={Launcher.openWallpaperPicker} chevron />
-            )}
-            {pictureWallpaper && (
-              <>
-                <Label text="Blur wallpaper" />
+                {settings.wallpaper === 'system' && (
+                  <Row label="Change phone wallpaper" onPress={Launcher.openWallpaperPicker} chevron />
+                )}
+                {pictureWallpaper && (
+                  <>
+                    <Label text="Blur wallpaper" />
+                    <Choice<number>
+                      value={settings.wallpaperBlur}
+                      onChange={set('wallpaperBlur')}
+                      options={[
+                        { value: 0, label: 'Off' },
+                        { value: 6, label: 'Soft' },
+                        { value: 14, label: 'Strong' },
+                      ]}
+                    />
+                  </>
+                )}
+                <Toggle
+                  label="Frosted glass"
+                  hint={
+                    pictureWallpaper
+                      ? 'Blurs the wallpaper behind the drawer, panels, dock and cards'
+                      : 'Works with picture wallpapers (themes or your photo)'
+                  }
+                  value={settings.panelBlur}
+                  onChange={set('panelBlur')}
+                />
+                <Label text="Dim wallpaper" />
                 <Choice<number>
-                  value={settings.wallpaperBlur}
-                  onChange={set('wallpaperBlur')}
+                  value={settings.dim}
+                  onChange={set('dim')}
                   options={[
                     { value: 0, label: 'Off' },
-                    { value: 6, label: 'Soft' },
-                    { value: 14, label: 'Strong' },
+                    { value: 0.15, label: 'Low' },
+                    { value: 0.3, label: 'Medium' },
+                    { value: 0.45, label: 'High' },
                   ]}
                 />
-              </>
-            )}
-            <Toggle
-              label="Frosted glass"
-              hint={
-                pictureWallpaper
-                  ? 'Blurs the wallpaper behind the drawer, panels, dock and cards'
-                  : 'Works with picture wallpapers (themes or your photo)'
-              }
-              value={settings.panelBlur}
-              onChange={set('panelBlur')}
-            />
-            <Label text="Dim wallpaper" />
-            <Choice<number>
-              value={settings.dim}
-              onChange={set('dim')}
-              options={[
-                { value: 0, label: 'Off' },
-                { value: 0.15, label: 'Low' },
-                { value: 0.3, label: 'Medium' },
-                { value: 0.45, label: 'High' },
-              ]}
-            />
-          </Section>
+              </Section>
 
-          <Section title="Clock" icon="time-outline">
-            <Choice<'home' | 'lock'>
-              value={clockTarget}
-              onChange={setClockTarget}
-              options={[
-                { value: 'home', label: 'Home screen' },
-                { value: 'lock', label: 'Lock screen' },
-              ]}
-            />
-            <View style={styles.faces}>
-              {CLOCK_FACES.filter((f) => clockTarget === 'home' || f.key !== 'minimal').map((f) => (
-                <ClockTile
-                  key={f.key}
-                  face={f.key}
-                  name={f.name}
-                  width={(contentWidth - 10) / 2}
-                  now={now}
-                  color={colorKey}
-                  selected={faceKey === f.key}
-                  onPress={() => updateSettings(clockTarget === 'home' ? { clockStyle: f.key } : { lockFace: f.key })}
-                />
-              ))}
-            </View>
-            <Label text="Clock color" />
-            <View style={styles.swatches}>
-              {CLOCK_COLORS.map((c) => {
-                const selected = colorKey === c;
-                const update = () => updateSettings(clockTarget === 'home' ? { clockColor: c } : { lockColor: c });
-                return (
-                  <Pressable key={c} onPress={update} style={[styles.swatch, styles.center, { borderColor: selected ? palette.text : 'transparent' }]}>
-                    {c === 'auto' ? (
-                      <Text style={[styles.swatchText, { color: palette.text }]}>A</Text>
-                    ) : (
-                      <View style={[styles.swatchFill, styles.swatchBorder, { backgroundColor: c === 'accent' ? palette.accent : c }]} />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </View>
-            <Toggle label="24-hour time" value={settings.clock24h} onChange={set('clock24h')} />
-            {clockTarget === 'home' && <Toggle label="Show clock on home" value={settings.showClock} onChange={set('showClock')} />}
-          </Section>
-
-          <Section title="Lock screen" icon="lock-closed-outline">
-            <Toggle
-              label="Lumo lock screen"
-              hint="Your clock style over the phone's lock. Swipe up to unlock — your PIN or fingerprint still protects the phone."
-              value={settings.lockEnabled}
-              onChange={(on) => {
-                updateSettings({ lockEnabled: on });
-                if (on) Launcher.requestNotificationPermission();
-              }}
-            />
-            {settings.lockEnabled && (
-              <>
-                {!isDefault && (
-                  <Text style={[styles.hint, { color: '#FF9F0A' }]}>Needs Lumo as your default home app to appear.</Text>
-                )}
-                <LockStatusLine status={lockStatus} use24h={settings.clock24h} />
-                <Row label="Test lock screen now" onPress={() => Launcher.testLockScreen()} chevron />
-                {lockStatus && !lockStatus.canDrawOverlays && (
-                  <Row
-                    label="Allow “Display over other apps”"
-                    detail="More reliable"
-                    onPress={() => Launcher.openOverlaySettings()}
-                    chevron
-                  />
-                )}
-                {lockStatus && !lockStatus.notificationsEnabled && (
-                  <Text style={[styles.hint, { color: '#FF9F0A' }]}>
-                    Lumo notifications are off. Turn them on in Android Settings → Apps → Lumo Launcher → Notifications
-                    (used only to open the lock screen).
-                  </Text>
-                )}
-              </>
-            )}
-            <Toggle label="Torch & camera buttons" value={settings.lockShortcuts} onChange={set('lockShortcuts')} />
-            <Row label="Lock screen clock style" detail={CLOCK_FACES.find((f) => f.key === settings.lockFace)?.name} onPress={() => setClockTarget('lock')} chevron />
-          </Section>
-
-          <Section title="Gestures & panels" icon="hand-left-outline">
-            <Label text="Swipe down on home" />
-            <Choice<SwipeDownAction>
-              value={settings.swipeDown}
-              onChange={set('swipeDown')}
-              options={[
-                { value: 'controls', label: 'Controls' },
-                { value: 'split', label: 'Split' },
-                { value: 'notifications', label: 'Alerts' },
-              ]}
-            />
-            <Text style={[styles.hint, { color: palette.subtext }]}>
-              {settings.swipeDown === 'split'
-                ? 'Left half opens notifications, right half opens the control panel.'
-                : settings.swipeDown === 'controls'
-                  ? 'Opens the Lumo control panel (it has a Notifications button too).'
-                  : 'Opens the phone’s notification shade.'}
-            </Text>
-            <Toggle label="Edge panel" hint="Swipe the little bar on the right edge" value={settings.edgePanel} onChange={set('edgePanel')} />
-            {settings.edgePanel && (
-              <>
-                <Label text="Edge bar position" />
-                <Choice<EdgeHandle>
-                  value={settings.edgeHandle}
-                  onChange={set('edgeHandle')}
+              <Section title="Clock" icon="time-outline">
+                <Choice<'home' | 'lock'>
+                  value={clockTarget}
+                  onChange={setClockTarget}
                   options={[
-                    { value: 'upper', label: 'Upper' },
-                    { value: 'middle', label: 'Middle' },
-                    { value: 'lower', label: 'Lower' },
+                    { value: 'home', label: 'Home screen' },
+                    { value: 'lock', label: 'Lock screen' },
                   ]}
                 />
-              </>
-            )}
-          </Section>
-
-          <Section title="Icons" icon="shapes-outline">
-            <Label text="Shape" />
-            <View style={styles.choiceRow}>
-              {SHAPES.map((s) => {
-                const active = settings.iconShape === s.key;
-                return (
-                  <Pressable
-                    key={s.key}
-                    onPress={() => updateSettings({ iconShape: s.key })}
-                    style={[styles.shapeChoice, { backgroundColor: active ? palette.accent : palette.chipBg }]}
-                  >
-                    <View style={[{ width: 26, height: 26, backgroundColor: active ? '#fff' : palette.accent }, shapeStyle(s.key, 26)]} />
-                    <Text style={[styles.shapeLabel, { color: active ? '#fff' : palette.text }]}>{s.name}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <Label text="Icon size" />
-            <Choice<number>
-              value={settings.iconSize}
-              onChange={set('iconSize')}
-              options={[
-                { value: 48, label: 'Small' },
-                { value: 56, label: 'Medium' },
-                { value: 62, label: 'Large' },
-                { value: 68, label: 'Huge' },
-              ]}
-            />
-            <Label text="Columns" />
-            <Choice<number>
-              value={settings.columns}
-              onChange={set('columns')}
-              options={[
-                { value: 4, label: '4' },
-                { value: 5, label: '5' },
-                { value: 6, label: '6' },
-              ]}
-            />
-            <Toggle label="App names" value={settings.showLabels} onChange={set('showLabels')} />
-            <Toggle label="Glass shine on icons" value={settings.iconShine} onChange={set('iconShine')} />
-            <Toggle label="Themed icons" hint="Tints icons with your accent color" value={settings.themedIcons} onChange={set('themedIcons')} />
-          </Section>
-
-          <Section title="Home screen" icon="home-outline">
-            <Toggle label="Battery & date cards" value={settings.showGlance} onChange={set('showGlance')} />
-            <Toggle label="Search bar" value={settings.showSearch} onChange={set('showSearch')} />
-          </Section>
-
-          <Section title="App drawer" icon="grid-outline">
-            <Label text="Layout" />
-            <Choice<DrawerStyle>
-              value={settings.drawerStyle}
-              onChange={set('drawerStyle')}
-              options={[
-                { value: 'grid', label: 'Grid' },
-                { value: 'pages', label: 'Pages' },
-                { value: 'list', label: 'List' },
-              ]}
-            />
-            <Text style={[styles.hint, { color: palette.subtext }]}>
-              {settings.drawerStyle === 'pages'
-                ? 'Swipe sideways through pages of apps — no endless scrolling.'
-                : settings.drawerStyle === 'list'
-                  ? 'One app per row, alphabetical.'
-                  : 'Scrolling grid of icons.'}
-            </Text>
-            {settings.drawerStyle !== 'pages' && (
-              <Toggle label="A–Z quick scroll" hint="Letters on the right edge jump through your apps" value={settings.azScroller} onChange={set('azScroller')} />
-            )}
-            <Toggle label="Category tabs" value={settings.drawerCategories} onChange={set('drawerCategories')} />
-            <Toggle label="Frequently used row" value={settings.showFrequent} onChange={set('showFrequent')} />
-          </Section>
-
-          <Section title={`Hidden apps (${hiddenApps.length})`} icon="eye-off-outline">
-            {hiddenApps.length === 0 ? (
-              <Text style={[styles.hint, { color: palette.subtext }]}>Long-press an app and choose “Hide app”.</Text>
-            ) : (
-              hiddenApps.map((app) => (
-                <View key={app.key} style={styles.hiddenRow}>
-                  {app.icon ? <Image source={{ uri: app.icon }} style={styles.hiddenIcon} /> : null}
-                  <Text numberOfLines={1} style={[styles.flex, styles.rowText, { color: palette.text }]}>
-                    {app.label}
-                  </Text>
-                  <Pressable
-                    onPress={() => updateLayout((l) => ({ ...l, hidden: l.hidden.filter((k) => k !== app.key) }))}
-                    style={[styles.pill, { backgroundColor: palette.chipBg }]}
-                  >
-                    <Text style={[styles.pillText, { color: palette.accent }]}>Show</Text>
-                  </Pressable>
+                <View style={styles.faces}>
+                  {CLOCK_FACES.filter((f) => clockTarget === 'home' || f.key !== 'minimal').map((f) => (
+                    <ClockTile
+                      key={f.key}
+                      face={f.key}
+                      name={f.name}
+                      width={(contentWidth - 10) / 2}
+                      now={now}
+                      color={colorKey}
+                      selected={faceKey === f.key}
+                      onPress={() => updateSettings(clockTarget === 'home' ? { clockStyle: f.key } : { lockFace: f.key })}
+                    />
+                  ))}
                 </View>
-              ))
-            )}
-          </Section>
+                <Label text="Clock color" />
+                <View style={styles.swatches}>
+                  {CLOCK_COLORS.map((c) => {
+                    const selected = colorKey === c;
+                    const update = () => updateSettings(clockTarget === 'home' ? { clockColor: c } : { lockColor: c });
+                    return (
+                      <Pressable key={c} onPress={update} style={[styles.swatch, styles.center, { borderColor: selected ? palette.text : 'transparent' }]}>
+                        {c === 'auto' ? (
+                          <Text style={[styles.swatchText, { color: palette.text }]}>A</Text>
+                        ) : (
+                          <View style={[styles.swatchFill, styles.swatchBorder, { backgroundColor: c === 'accent' ? palette.accent : c }]} />
+                        )}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Toggle label="24-hour time" value={settings.clock24h} onChange={set('clock24h')} />
+                {clockTarget === 'home' && <Toggle label="Show clock on home" value={settings.showClock} onChange={set('showClock')} />}
+              </Section>
+            </>
+          )}
 
-          <Section title="Launcher" icon="layers-outline">
-            <Row label="Default home app" detail={isDefault ? 'Lumo' : 'Not set'} onPress={Launcher.openHomeSettings} chevron />
-            <Row label="Refresh app list" onPress={refreshApps} chevron />
-            <Row label="Reset look to defaults" onPress={resetSettings} destructive />
-          </Section>
+          {stage >= 2 && (
+            <>
 
-          <Text style={[styles.footer, { color: palette.subtext }]}>Lumo Launcher · Everything stays on your phone</Text>
+              <Section title="Lock screen" icon="lock-closed-outline">
+                <Toggle
+                  label="Lumo lock screen"
+                  hint="Your clock style over the phone's lock. Swipe up to unlock — your PIN or fingerprint still protects the phone."
+                  value={settings.lockEnabled}
+                  onChange={(on) => {
+                    updateSettings({ lockEnabled: on });
+                    if (on) Launcher.requestNotificationPermission();
+                  }}
+                />
+                {settings.lockEnabled && (
+                  <>
+                    {!isDefault && (
+                      <Text style={[styles.hint, { color: '#FF9F0A' }]}>Needs Lumo as your default home app to appear.</Text>
+                    )}
+                    <LockStatusLine status={lockStatus} use24h={settings.clock24h} />
+                    <Row label="Test lock screen now" onPress={() => Launcher.testLockScreen()} chevron />
+                    {lockStatus && !lockStatus.canDrawOverlays && (
+                      <Row
+                        label="Allow “Display over other apps”"
+                        detail="Opens faster"
+                        onPress={() => Launcher.openOverlaySettings()}
+                        chevron
+                      />
+                    )}
+                    {lockStatus && !lockStatus.notificationsEnabled && (
+                      <Text style={[styles.hint, { color: '#FF9F0A' }]}>
+                        Lumo notifications are off. Turn them on in Android Settings → Apps → Lumo Launcher → Notifications
+                        (used only to open the lock screen).
+                      </Text>
+                    )}
+                  </>
+                )}
+                <Toggle label="Torch & camera buttons" value={settings.lockShortcuts} onChange={set('lockShortcuts')} />
+                <Row label="Lock screen clock style" detail={CLOCK_FACES.find((f) => f.key === settings.lockFace)?.name} onPress={() => setClockTarget('lock')} chevron />
+              </Section>
+
+              <Section title="Gestures & panels" icon="hand-left-outline">
+                <Label text="Swipe down on home" />
+                <Choice<SwipeDownAction>
+                  value={settings.swipeDown}
+                  onChange={set('swipeDown')}
+                  options={[
+                    { value: 'controls', label: 'Controls' },
+                    { value: 'split', label: 'Split' },
+                    { value: 'notifications', label: 'Alerts' },
+                  ]}
+                />
+                <Text style={[styles.hint, { color: palette.subtext }]}>
+                  {settings.swipeDown === 'split'
+                    ? 'Left half opens notifications, right half opens the control panel.'
+                    : settings.swipeDown === 'controls'
+                      ? 'Opens the Lumo control panel (it has a Notifications button too).'
+                      : 'Opens the phone’s notification shade.'}
+                </Text>
+                <Toggle label="Edge panel" hint="Swipe the little bar on the right edge" value={settings.edgePanel} onChange={set('edgePanel')} />
+                {settings.edgePanel && (
+                  <>
+                    <Label text="Edge bar position" />
+                    <Choice<EdgeHandle>
+                      value={settings.edgeHandle}
+                      onChange={set('edgeHandle')}
+                      options={[
+                        { value: 'upper', label: 'Upper' },
+                        { value: 'middle', label: 'Middle' },
+                        { value: 'lower', label: 'Lower' },
+                      ]}
+                    />
+                  </>
+                )}
+              </Section>
+
+              <Section title="Icons" icon="shapes-outline">
+                <Label text="Shape" />
+                <View style={styles.choiceRow}>
+                  {SHAPES.map((s) => {
+                    const active = settings.iconShape === s.key;
+                    return (
+                      <Pressable
+                        key={s.key}
+                        onPress={() => updateSettings({ iconShape: s.key })}
+                        style={[styles.shapeChoice, { backgroundColor: active ? palette.accent : palette.chipBg }]}
+                      >
+                        <View style={[{ width: 26, height: 26, backgroundColor: active ? '#fff' : palette.accent }, shapeStyle(s.key, 26)]} />
+                        <Text style={[styles.shapeLabel, { color: active ? '#fff' : palette.text }]}>{s.name}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Label text="Icon size" />
+                <Choice<number>
+                  value={settings.iconSize}
+                  onChange={set('iconSize')}
+                  options={[
+                    { value: 48, label: 'Small' },
+                    { value: 56, label: 'Medium' },
+                    { value: 62, label: 'Large' },
+                    { value: 68, label: 'Huge' },
+                  ]}
+                />
+                <Label text="Columns" />
+                <Choice<number>
+                  value={settings.columns}
+                  onChange={set('columns')}
+                  options={[
+                    { value: 4, label: '4' },
+                    { value: 5, label: '5' },
+                    { value: 6, label: '6' },
+                  ]}
+                />
+                <Toggle label="App names" value={settings.showLabels} onChange={set('showLabels')} />
+                <Toggle label="Glass shine on icons" value={settings.iconShine} onChange={set('iconShine')} />
+                <Toggle label="Themed icons" hint="Tints icons with your accent color" value={settings.themedIcons} onChange={set('themedIcons')} />
+              </Section>
+
+              <Section title="Home screen" icon="home-outline">
+                <Toggle label="Battery & date cards" value={settings.showGlance} onChange={set('showGlance')} />
+                <Toggle label="Search bar" value={settings.showSearch} onChange={set('showSearch')} />
+              </Section>
+
+              <Section title="App drawer" icon="grid-outline">
+                <Label text="Layout" />
+                <Choice<DrawerStyle>
+                  value={settings.drawerStyle}
+                  onChange={set('drawerStyle')}
+                  options={[
+                    { value: 'grid', label: 'Grid' },
+                    { value: 'pages', label: 'Pages' },
+                    { value: 'list', label: 'List' },
+                  ]}
+                />
+                <Text style={[styles.hint, { color: palette.subtext }]}>
+                  {settings.drawerStyle === 'pages'
+                    ? 'Swipe sideways through pages of apps — no endless scrolling.'
+                    : settings.drawerStyle === 'list'
+                      ? 'One app per row, alphabetical.'
+                      : 'Scrolling grid of icons.'}
+                </Text>
+                {settings.drawerStyle !== 'pages' && (
+                  <Toggle label="A–Z quick scroll" hint="Letters on the right edge jump through your apps" value={settings.azScroller} onChange={set('azScroller')} />
+                )}
+                <Toggle label="Category tabs" value={settings.drawerCategories} onChange={set('drawerCategories')} />
+                <Toggle label="Frequently used row" value={settings.showFrequent} onChange={set('showFrequent')} />
+              </Section>
+
+              <Section title={`Hidden apps (${hiddenApps.length})`} icon="eye-off-outline">
+                {hiddenApps.length === 0 ? (
+                  <Text style={[styles.hint, { color: palette.subtext }]}>Long-press an app and choose “Hide app”.</Text>
+                ) : (
+                  hiddenApps.map((app) => (
+                    <View key={app.key} style={styles.hiddenRow}>
+                      {app.icon ? <Image source={{ uri: app.icon }} style={styles.hiddenIcon} /> : null}
+                      <Text numberOfLines={1} style={[styles.flex, styles.rowText, { color: palette.text }]}>
+                        {app.label}
+                      </Text>
+                      <Pressable
+                        onPress={() => updateLayout((l) => ({ ...l, hidden: l.hidden.filter((k) => k !== app.key) }))}
+                        style={[styles.pill, { backgroundColor: palette.chipBg }]}
+                      >
+                        <Text style={[styles.pillText, { color: palette.accent }]}>Show</Text>
+                      </Pressable>
+                    </View>
+                  ))
+                )}
+              </Section>
+
+              <Section title="Launcher" icon="layers-outline">
+                <Row label="Default home app" detail={isDefault ? 'Lumo' : 'Not set'} onPress={Launcher.openHomeSettings} chevron />
+                <Row label="Refresh app list" onPress={refreshApps} chevron />
+                <Row label="Reset look to defaults" onPress={resetSettings} destructive />
+              </Section>
+
+              <Text style={[styles.footer, { color: palette.subtext }]}>Lumo Launcher · Everything stays on your phone</Text>
+            </>
+          )}
         </ScrollView>
       </View>
     </Modal>
   );
-}
+});
 
 function LockStatusLine({ status, use24h }: { status: Launcher.LockScreenStatus | null; use24h: boolean }) {
-  const { palette } = useStore();
+  const { palette } = useLook();
   if (!status) return null;
   const at = (ms: number) => {
     const { hours, minutes, suffix } = formatTime(new Date(ms), use24h);
@@ -498,20 +543,23 @@ function LockStatusLine({ status, use24h }: { status: Launcher.LockScreenStatus 
   return <Text style={[styles.hint, { color, marginTop: 6 }]}>{text}</Text>;
 }
 
-function ThemeCard({
+const themeKey = (t: ThemePreset) => t.id;
+const ThemeGap = () => <View style={styles.themeGap} />;
+
+const ThemeCard = memo(function ThemeCard({
   preset,
   apps,
   now,
   selected,
-  onPress,
+  onSelect,
 }: {
   preset: ThemePreset;
   apps: App[];
   now: Date;
   selected: boolean;
-  onPress: () => void;
+  onSelect: (preset: ThemePreset) => void;
 }) {
-  const { palette } = useStore();
+  const { palette } = useLook();
   const p = preset.patch;
   const image = p.wallpaper?.startsWith('img:') ? WALLPAPER_IMAGES[p.wallpaper.slice(4)]?.source : undefined;
   const light = p.theme === 'light';
@@ -523,7 +571,7 @@ function ThemeCard({
     </View>
   );
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.themeCard, pressed && { transform: [{ scale: 0.96 }] }]}>
+    <Pressable onPress={() => onSelect(preset)} style={({ pressed }) => [styles.themeCard, pressed && { transform: [{ scale: 0.96 }] }]}>
       <View style={[styles.phone, { borderColor: selected ? palette.accent : palette.separator }]}>
         {image ? <Image source={image} style={StyleSheet.absoluteFill} resizeMode="cover" resizeMethod="resize" /> : null}
         <View style={[styles.miniClock, p.clockStyle === 'giant' && styles.center]}>
@@ -541,7 +589,7 @@ function ThemeCard({
       <Text style={[styles.themeSub, { color: palette.subtext }]}>{preset.subtitle}</Text>
     </Pressable>
   );
-}
+});
 
 function ClockTile({
   face,
@@ -560,7 +608,7 @@ function ClockTile({
   selected: boolean;
   onPress: () => void;
 }) {
-  const { palette, settings } = useStore();
+  const { palette, settings } = useLook();
   const image = wallpaperImage(settings);
   const gradient = GRADIENTS[settings.wallpaper];
   const resolved = resolveClockColor(color, palette);
@@ -591,7 +639,7 @@ function ClockTile({
 }
 
 function Section({ title, icon, children }: { title: string; icon: keyof typeof Ionicons.glyphMap; children: ReactNode }) {
-  const { palette } = useStore();
+  const { palette } = useLook();
   return (
     <Glass radius={24} style={styles.section}>
       <View style={styles.sectionHeader}>
@@ -604,7 +652,7 @@ function Section({ title, icon, children }: { title: string; icon: keyof typeof 
 }
 
 function Label({ text }: { text: string }) {
-  const { palette } = useStore();
+  const { palette } = useLook();
   return <Text style={[styles.label, { color: palette.subtext }]}>{text}</Text>;
 }
 
@@ -617,7 +665,7 @@ function Choice<T extends string | number>({
   options: { value: T; label: string }[];
   onChange: (v: T) => void;
 }) {
-  const { palette } = useStore();
+  const { palette } = useLook();
   return (
     <View style={[styles.segment, { backgroundColor: palette.chipBg }]}>
       {options.map((o) => {
@@ -637,7 +685,7 @@ function Choice<T extends string | number>({
 }
 
 function Toggle({ label, hint, value, onChange }: { label: string; hint?: string; value: boolean; onChange: (v: boolean) => void }) {
-  const { palette } = useStore();
+  const { palette } = useLook();
   return (
     <Pressable onPress={() => onChange(!value)} style={styles.row}>
       <View style={styles.flex}>
@@ -667,7 +715,7 @@ function Row({
   chevron?: boolean;
   destructive?: boolean;
 }) {
-  const { palette } = useStore();
+  const { palette } = useLook();
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}>
       <Text style={[styles.flex, styles.rowText, { color: destructive ? '#FF453A' : palette.text }]}>{label}</Text>
@@ -678,7 +726,7 @@ function Row({
 }
 
 function WallTile({ selected, name, onPress, children }: { selected: boolean; name: string; onPress: () => void; children: ReactNode }) {
-  const { palette } = useStore();
+  const { palette } = useLook();
   return (
     <Pressable onPress={onPress} style={styles.wallTile}>
       <View style={[styles.wallFrame, { borderColor: selected ? palette.accent : 'transparent' }]}>
@@ -798,8 +846,10 @@ const styles = StyleSheet.create({
     fontFamily: 'sans-serif-medium',
   },
   themes: {
-    gap: 12,
     paddingVertical: 2,
+  },
+  themeGap: {
+    width: 12,
   },
   themeCard: {
     width: 104,

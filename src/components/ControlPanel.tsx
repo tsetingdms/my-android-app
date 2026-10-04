@@ -1,13 +1,13 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, PanResponder, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import * as Launcher from '../../modules/launcher';
 import type { SettingsPanel, SystemState } from '../../modules/launcher';
 import { formatTime, MONTHS, useBattery, useMinuteClock, WEEKDAYS } from '../hooks';
-import { useStore } from '../store';
+import { useLook } from '../store';
 import { Glass } from './Glass';
 import { Tilt } from './Tilt';
 import { PanelBackdrop } from './Wallpaper';
@@ -17,6 +17,9 @@ type Props = {
   /** 0 = hidden, 1 = fully open. Driven by the home swipe-down gesture. */
   progress: Animated.Value;
   open: boolean;
+  /** True while opening/closing/dragging: the panel is then drawn once into a GPU texture and only moved. */
+  animating: boolean;
+  onDragStart: () => void;
   onClose: () => void;
   onSettle: () => void;
 };
@@ -26,8 +29,8 @@ const GAP = 12;
 type Icon = keyof typeof Ionicons.glyphMap;
 
 /** Honor/HyperOS-style control centre: frosted tiles that tilt toward the finger. */
-export function ControlPanel({ progress, open, onClose, onSettle }: Props) {
-  const { palette, settings } = useStore();
+export const ControlPanel = memo(function ControlPanel({ progress, open, animating, onDragStart, onClose, onSettle }: Props) {
+  const { palette, settings } = useLook();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const now = useMinuteClock();
@@ -37,29 +40,41 @@ export function ControlPanel({ progress, open, onClose, onSettle }: Props) {
   const unit = Math.floor((width - PAD * 2 - GAP * 3) / 4);
   const wide = unit * 2 + GAP;
 
-  const refresh = useCallback(() => setState(Launcher.getSystemState()), []);
+  // Only re-render when something actually changed (most polls return the same state).
+  const lastState = useRef(JSON.stringify(state));
+  const refresh = useCallback(() => {
+    const next = Launcher.getSystemState();
+    const json = JSON.stringify(next);
+    if (json === lastState.current) return;
+    lastState.current = json;
+    setState(next);
+  }, []);
 
   useEffect(() => {
     if (!open) {
       setNeedsAccess(null);
       return;
     }
-    refresh();
+    // The first read waits for the slide-in to finish, so the opening frames stay smooth
+    // (the tiles show the last known state meanwhile, which is almost always still right).
+    const first = setTimeout(refresh, 380);
     const id = setInterval(refresh, 2000);
     const offTorch = Launcher.addTorchListener(refresh);
     return () => {
+      clearTimeout(first);
       clearInterval(id);
       offTorch();
     };
   }, [open, refresh]);
 
   // Swipe up anywhere on the panel to put it away (sliders keep their own drags).
-  const latest = useRef({ onClose, onSettle });
-  latest.current = { onClose, onSettle };
+  const latest = useRef({ onClose, onSettle, onDragStart });
+  latest.current = { onClose, onSettle, onDragStart };
   const pan = useMemo(
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponder: (_, g) => g.dy < -10 && Math.abs(g.dy) > Math.abs(g.dx),
+        onPanResponderGrant: () => latest.current.onDragStart(),
         onPanResponderMove: (_, g) => progress.setValue(Math.max(0, Math.min(1, 1 + g.dy / 320))),
         onPanResponderRelease: (_, g) => {
           if (g.dy < -60 || g.vy < -0.5) latest.current.onClose();
@@ -114,7 +129,10 @@ export function ControlPanel({ progress, open, onClose, onSettle }: Props) {
 
   return (
     <Animated.View pointerEvents={open ? 'auto' : 'none'} style={StyleSheet.absoluteFill}>
-      <Animated.View style={[StyleSheet.absoluteFill, { opacity: backdropOpacity }]}>
+      <Animated.View
+        renderToHardwareTextureAndroid={animating}
+        style={[StyleSheet.absoluteFill, { opacity: backdropOpacity }]}
+      >
         <PanelBackdrop
           blurTint={palette.dark ? 'rgba(8,8,14,0.4)' : 'rgba(236,238,244,0.4)'}
           solidTint={palette.dark ? 'rgba(10,10,14,0.9)' : 'rgba(238,240,246,0.92)'}
@@ -124,6 +142,7 @@ export function ControlPanel({ progress, open, onClose, onSettle }: Props) {
 
       <Animated.View
         {...pan.panHandlers}
+        renderToHardwareTextureAndroid={animating}
         style={[styles.content, { paddingTop: insets.top + 14, paddingHorizontal: PAD }, contentStyle]}
       >
         {/* Header: time, date, battery and system settings */}
@@ -288,7 +307,7 @@ export function ControlPanel({ progress, open, onClose, onSettle }: Props) {
       </Animated.View>
     </Animated.View>
   );
-}
+});
 
 function WideTile({
   width,
@@ -307,7 +326,7 @@ function WideTile({
   active: boolean;
   onPress: () => void;
 }) {
-  const { palette } = useStore();
+  const { palette } = useLook();
   return (
     <Tilt style={{ width, height }} radius={24} max={8} onPress={onPress}>
       <Glass radius={24} style={styles.wide}>
@@ -341,12 +360,12 @@ function RoundTile({
   active?: boolean;
   onPress: () => void;
 }) {
-  const { palette } = useStore();
+  const { palette } = useLook();
   const d = Math.round(size * 0.8);
   return (
     <View style={{ width: size, alignItems: 'center' }}>
       <Tilt style={{ width: d, height: d }} radius={d / 2} max={14} onPress={onPress}>
-        <Glass radius={d / 2} style={styles.round}>
+        <Glass radius={d / 2} style={styles.round} highlight={false}>
           {active && <View style={[StyleSheet.absoluteFill, { backgroundColor: palette.accent }]} />}
           <Ionicons name={icon} size={22} color={active ? '#fff' : palette.text} />
         </Glass>
@@ -376,7 +395,7 @@ function PillSlider({
   onBlocked?: () => void;
   onChange: (value: number) => void;
 }) {
-  const { palette } = useStore();
+  const { palette } = useLook();
   const anim = useRef(new Animated.Value(value)).current;
   const scale = useRef(new Animated.Value(1)).current;
   const current = useRef(value);
@@ -433,14 +452,17 @@ function PillSlider({
 
   const radius = Math.min(width / 2.2, 30);
   const fill = palette.dark ? 'rgba(255,255,255,0.92)' : '#FFFFFF';
-  const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [height, 0], extrapolate: 'clamp' });
+  const translateY = useMemo(
+    () => anim.interpolate({ inputRange: [0, 1], outputRange: [height, 0], extrapolate: 'clamp' }),
+    [anim, height]
+  );
 
   return (
     <Animated.View
       {...pan.panHandlers}
       style={{ width, height, borderRadius: radius, overflow: 'hidden', transform: [{ scale }] }}
     >
-      <Glass radius={radius} style={StyleSheet.absoluteFill} />
+      <Glass radius={radius} style={StyleSheet.absoluteFill} highlight={false} />
       <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: fill, transform: [{ translateY }] }]} />
       <View pointerEvents="none" style={styles.pillIcon}>
         <Ionicons name={icon} size={22} color={shown > 0.12 ? '#1C1C1E' : palette.text} />

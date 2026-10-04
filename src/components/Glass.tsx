@@ -2,7 +2,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { Image, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
-import { useStore } from '../store';
+import { useLook } from '../store';
 import { wallpaperImage } from '../theme';
 import { BACKDROP_BLUR, useScreenSize } from './Wallpaper';
 
@@ -15,6 +15,8 @@ type GlassProps = {
    * behind the card. Only for cards that don't scroll (dock, search, home cards).
    */
   frosted?: boolean;
+  /** Light reflection along the straight top edge; turn off for circles and narrow pills. */
+  highlight?: boolean;
 };
 
 /**
@@ -22,8 +24,8 @@ type GlassProps = {
  * built from cheap layers: a translucent tint, a diagonal light sheen, a bright rim and a
  * specular highlight along the top edge — plus, over picture wallpapers, a pre-blurred backdrop.
  */
-export function Glass({ children, style, radius = 26, frosted }: GlassProps) {
-  const { palette, settings } = useStore();
+export function Glass({ children, style, radius = 26, frosted, highlight = true }: GlassProps) {
+  const { palette, settings } = useLook();
   const screen = useScreenSize();
   const sheen = settings.glass !== 'solid';
   const backdrop = frosted && sheen && settings.panelBlur && screen ? wallpaperImage(settings) : null;
@@ -73,13 +75,13 @@ export function Glass({ children, style, radius = 26, frosted }: GlassProps) {
           style={StyleSheet.absoluteFill}
         />
       )}
-      {sheen && (
-        <View
+      {sheen && highlight && settings.glassEdge && (
+        <LinearGradient
           pointerEvents="none"
-          style={[
-            styles.highlight,
-            { left: radius * 0.7, right: radius * 0.7, backgroundColor: palette.glassHighlight },
-          ]}
+          colors={['rgba(255,255,255,0)', palette.glassHighlight, 'rgba(255,255,255,0)']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={[styles.highlight, { left: radius, right: radius }]}
         />
       )}
       {children}
@@ -113,6 +115,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     height: 1,
+    opacity: 0.8,
   },
   pressed: {
     opacity: 0.8,

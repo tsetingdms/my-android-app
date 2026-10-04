@@ -41,6 +41,8 @@ export type Settings = {
   showLabels: boolean;
   themedIcons: boolean;
   iconShine: boolean;
+  /** Soft light reflection along the top edge of glass boxes. */
+  glassEdge: boolean;
   clockStyle: ClockFace;
   /** 'auto', 'accent' or a hex color. */
   clockColor: string;
@@ -77,6 +79,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showLabels: true,
   themedIcons: false,
   iconShine: true,
+  glassEdge: true,
   clockStyle: 'large',
   clockColor: 'auto',
   clock24h: false,

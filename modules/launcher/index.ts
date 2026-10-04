@@ -86,6 +86,7 @@ declare class LauncherNativeModule extends NativeModule<LauncherEvents> {
   openCalendar(): boolean;
   expandNotifications(): boolean;
   setTorch(on: boolean): boolean;
+  isTorchOn?(): boolean;
   getBattery(): BatteryInfo;
   getDeviceStats(): Promise<DeviceStats>;
   getWallpaperColor(): string | null;
@@ -131,6 +132,8 @@ export const openAlarms = () => native?.openAlarms() ?? false;
 export const openCalendar = () => native?.openCalendar() ?? false;
 export const expandNotifications = () => native?.expandNotifications() ?? false;
 export const setTorch = (on: boolean) => native?.setTorch(on) ?? false;
+/** Cheap cached torch state (no full system-state read). */
+export const isTorchOn = (): boolean => (native?.isTorchOn ? native.isTorchOn() : false);
 export const getWallpaperColor = () => native?.getWallpaperColor() ?? null;
 
 const NO_STATE: SystemState = {

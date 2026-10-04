@@ -1,8 +1,8 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { createContext, useContext } from 'react';
+import { createContext, memo, useContext } from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 
-import { useStore } from '../store';
+import { useLook } from '../store';
 import { GRADIENTS, wallpaperImage } from '../theme';
 
 /** Blur (dp) used for frosted panels and glass cards over picture wallpapers. */
@@ -17,8 +17,8 @@ export const useScreenSize = () => useContext(ScreenSizeContext);
  * the window; otherwise it shows a gradient or a picture (theme art or the user's photo).
  * Picture blur is computed once at decode time by the image pipeline, not every frame.
  */
-export function Wallpaper() {
-  const { settings, palette } = useStore();
+export const Wallpaper = memo(function Wallpaper() {
+  const { settings, palette } = useLook();
   const image = wallpaperImage(settings);
   const gradient = image ? undefined : GRADIENTS[settings.wallpaper];
   const dim = settings.dim;
@@ -68,14 +68,14 @@ export function Wallpaper() {
       )}
     </View>
   );
-}
+});
 
 /**
  * Full-screen frosted background for overlays (drawer, control panel, edge panel): the blurred
  * wallpaper picture under a light tint, or a stronger plain tint for the phone wallpaper.
  */
 export function PanelBackdrop({ blurTint, solidTint }: { blurTint: string; solidTint: string }) {
-  const { settings } = useStore();
+  const { settings } = useLook();
   const image = settings.panelBlur ? wallpaperImage(settings) : null;
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>

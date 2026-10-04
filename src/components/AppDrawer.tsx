@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   FlatList,
@@ -22,7 +22,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { App } from '../store';
-import { useStore } from '../store';
+import { useLook, useStore } from '../store';
 import { CATEGORIES, type DrawerStyle } from '../theme';
 import { AppIcon, type IconLook } from './AppIcon';
 import { Glass, GlassButton } from './Glass';
@@ -65,7 +65,7 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
-export function AppDrawer({
+export const AppDrawer = memo(function AppDrawer({
   y,
   open,
   focusSearch,
@@ -370,7 +370,7 @@ export function AppDrawer({
                   )}
                 </View>
               </Glass>
-              <GlassButton radius={24} style={styles.gear} onPress={onOpenSettings}>
+              <GlassButton radius={24} style={styles.gear} onPress={onOpenSettings} highlight={false}>
                 <View style={styles.gearInner}>
                   <Ionicons name="settings-outline" size={20} color={palette.text} />
                 </View>
@@ -516,7 +516,7 @@ export function AppDrawer({
               )}
               {azLetter ? (
                 <View pointerEvents="none" style={styles.azBubbleWrap}>
-                  <Glass radius={28} style={styles.azBubble}>
+                  <Glass radius={28} style={styles.azBubble} highlight={false}>
                     <Text style={[styles.azBubbleText, { color: palette.text }]}>{azLetter}</Text>
                   </Glass>
                 </View>
@@ -527,10 +527,10 @@ export function AppDrawer({
       </GestureDetector>
     </Animated.View>
   );
-}
+});
 
 function WebAction({ icon, label, onPress }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void }) {
-  const { palette } = useStore();
+  const { palette } = useLook();
   return (
     <GlassButton radius={18} onPress={onPress}>
       <View style={styles.webAction}>

@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { memo } from 'react';
 import { Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -27,7 +28,7 @@ function move(list: string[], key: string, delta: number): string[] {
   return next;
 }
 
-export function ActionsSheet({ target, onClose }: { target: ActionTarget | null; onClose: () => void }) {
+export const ActionsSheet = memo(function ActionsSheet({ target, onClose }: { target: ActionTarget | null; onClose: () => void }) {
   const { layout, updateLayout, palette } = useStore();
   const insets = useSafeAreaInsets();
   const app = target?.app;
@@ -136,7 +137,7 @@ export function ActionsSheet({ target, onClose }: { target: ActionTarget | null;
       </Pressable>
     </Modal>
   );
-}
+});
 
 const styles = StyleSheet.create({
   backdrop: {

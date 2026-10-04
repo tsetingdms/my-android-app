@@ -1,10 +1,10 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Image, PanResponder, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import * as Launcher from '../../modules/launcher';
 import type { App } from '../store';
-import { useStore } from '../store';
+import { useLook, useStore } from '../store';
 import { shapeStyle, type EdgeHandle as HandlePosition } from '../theme';
 import { Glass } from './Glass';
 import { Tilt } from './Tilt';
@@ -20,16 +20,17 @@ const HANDLE_TOP: Record<HandlePosition, number> = { upper: 0.2, middle: 0.4, lo
 type HandleProps = {
   progress: Animated.Value;
   position: HandlePosition;
+  onDragStart: () => void;
   onOpen: () => void;
   onClose: () => void;
 };
 
 /** The small curved bar on the right edge. Swipe it left (or tap it) to open the edge panel. */
-export function EdgeHandle({ progress, position, onOpen, onClose }: HandleProps) {
+export const EdgeHandle = memo(function EdgeHandle({ progress, position, onDragStart, onOpen, onClose }: HandleProps) {
   const { height } = useWindowDimensions();
-  const { palette } = useStore();
-  const latest = useRef({ onOpen, onClose });
-  latest.current = { onOpen, onClose };
+  const { palette } = useLook();
+  const latest = useRef({ onOpen, onClose, onDragStart });
+  latest.current = { onOpen, onClose, onDragStart };
 
   const pan = useMemo(
     () =>
@@ -37,6 +38,7 @@ export function EdgeHandle({ progress, position, onOpen, onClose }: HandleProps)
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
         onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => latest.current.onDragStart(),
         onPanResponderMove: (_, g) => {
           if (g.dx < 0) progress.setValue(Math.min(1, -g.dx / EDGE_PANEL_WIDTH));
         },
@@ -60,11 +62,14 @@ export function EdgeHandle({ progress, position, onOpen, onClose }: HandleProps)
       />
     </View>
   );
-}
+});
 
 type PanelProps = {
   progress: Animated.Value;
   open: boolean;
+  /** True while opening/closing/dragging: the panel is then drawn once into a GPU texture and only moved. */
+  animating: boolean;
+  onDragStart: () => void;
   onClose: () => void;
   onSettle: () => void;
   onLaunch: (app: App) => void;
@@ -74,9 +79,11 @@ type PanelProps = {
 };
 
 /** Glass side panel with tools and favourite apps (all offline). */
-export function EdgePanel({
+export const EdgePanel = memo(function EdgePanel({
   progress,
   open,
+  animating,
+  onDragStart,
   onClose,
   onSettle,
   onLaunch,
@@ -87,12 +94,13 @@ export function EdgePanel({
   const { palette, layout, appsByKey, apps, settings } = useStore();
   const { height } = useWindowDimensions();
   const [torch, setTorch] = useState(false);
-  const latest = useRef({ onClose, onSettle });
-  latest.current = { onClose, onSettle };
+  const latest = useRef({ onClose, onSettle, onDragStart });
+  latest.current = { onClose, onSettle, onDragStart };
 
   useEffect(() => {
     if (!open) return;
-    setTorch(Launcher.getSystemState().torch);
+    // Cheap cached flag (not the full system state), so opening doesn't stall a frame.
+    setTorch(Launcher.isTorchOn());
     return Launcher.addTorchListener(setTorch);
   }, [open]);
 
@@ -114,6 +122,7 @@ export function EdgePanel({
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponder: (_, g) => g.dx > 10 && Math.abs(g.dx) > Math.abs(g.dy),
+        onPanResponderGrant: () => latest.current.onDragStart(),
         onPanResponderMove: (_, g) => progress.setValue(Math.max(0, Math.min(1, 1 - g.dx / EDGE_PANEL_WIDTH))),
         onPanResponderRelease: (_, g) => {
           if (g.dx > 50 || g.vx > 0.3) latest.current.onClose();
@@ -163,12 +172,16 @@ export function EdgePanel({
 
   return (
     <Animated.View pointerEvents={open ? 'auto' : 'none'} style={StyleSheet.absoluteFill}>
-      <Animated.View style={[StyleSheet.absoluteFill, styles.scrim, { opacity: scrimOpacity }]}>
+      <Animated.View
+        renderToHardwareTextureAndroid={animating}
+        style={[StyleSheet.absoluteFill, styles.scrim, { opacity: scrimOpacity }]}
+      >
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
       </Animated.View>
 
       <Animated.View
         {...pan.panHandlers}
+        renderToHardwareTextureAndroid={animating}
         style={[styles.panel, { top: height * 0.12, bottom: height * 0.1 }, panelStyle]}
       >
         <View style={[StyleSheet.absoluteFill, styles.panelClip]}>
@@ -229,7 +242,7 @@ export function EdgePanel({
       </Animated.View>
     </Animated.View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   handleArea: {

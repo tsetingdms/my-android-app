@@ -1,13 +1,14 @@
+import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import * as Launcher from '../../../modules/launcher';
 import { formatTime, greeting, MONTHS, useMinuteClock, WEEKDAYS } from '../../hooks';
-import { useStore } from '../../store';
+import { useLook } from '../../store';
 import { ClockFace, resolveClockColor } from '../ClockFace';
 import { Glass } from '../Glass';
 
-export function ClockWidget() {
-  const { settings, palette } = useStore();
+export const ClockWidget = memo(function ClockWidget() {
+  const { settings, palette } = useLook();
   const now = useMinuteClock();
 
   if (settings.clockStyle === 'minimal') {
@@ -40,7 +41,7 @@ export function ClockWidget() {
       />
     </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
   wrap: {
