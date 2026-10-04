@@ -183,6 +183,8 @@ No Expo account / EAS is used — keep it that way.
   branch, inputs `{"release": "false"}` for a test build); watch `…/actions/runs/<id>` via the API or
   `actions_get` / `get_job_logs`.
 - The Actions secrets API is blocked from the session: signing secrets are managed by the owner in GitHub settings.
+- Inspecting a release APK: resource file names are shortened in release builds (e.g. wallpapers become `res/Lt.jpg`),
+  so look up asset names in `resources.arsc` (`assets_wallpapers_<id>`); fonts stay in `assets/fonts/`.
 
 ## Testing on the phone
 
