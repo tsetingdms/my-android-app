@@ -4,6 +4,7 @@ A fast, lightweight Android home-screen launcher made for budget phones (tuned o
 built with Expo (React Native) + TypeScript and a small native Kotlin module.
 
 **Download the latest APK:** https://github.com/tsetingdms/my-android-app/releases/latest/download/lumo-launcher.apk
+(smaller 64-bit-only build: https://github.com/tsetingdms/my-android-app/releases/latest/download/lumo-launcher-arm64.apk)
 
 ## Features
 
@@ -19,13 +20,42 @@ built with Expo (React Native) + TypeScript and a small native Kotlin module.
 - **Customise** (long-press empty home space) – dark/light/auto theme, accent colours or wallpaper-matched accent,
   your phone wallpaper or built-in gradients, wallpaper dimming, hide apps, reorder home/dock.
 - Swipe down on home to open notifications; long-press any app for add/remove/move/hide/info/uninstall.
-- Everything is stored on the phone. No account, no internet needed.
+- Everything is stored on the phone. No account, no internet permission in release builds, and no cloud backup of
+  your data.
 
 ## Build
 
 The APK is built by GitHub Actions (`.github/workflows/build-apk.yml`) on every push to `main` or by running the
-workflow manually. It runs `expo prebuild` and `./gradlew assembleRelease` (signed with the debug keystore), uploads the
-APK as a workflow artifact and attaches it to a GitHub Release.
+workflow manually, in two jobs:
+
+1. **build** (read-only token, no secrets): `npm ci`, typecheck, `expo prebuild`, `./gradlew assembleRelease`.
+2. **release** (holds the signing key and write access, runs no npm/Gradle code): signs the universal and 64-bit
+   APKs with your release key, uploads them as a workflow artifact and publishes a GitHub Release whose notes list the
+   signing-certificate fingerprint and SHA-256 checksums.
+
+## Release signing
+
+Until the secrets below exist, releases are signed with the public React Native debug key (the workflow prints a
+warning). Anyone has that key, so set up your own once:
+
+1. Create a key (needs a JDK; Android Studio ships one at
+   `C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe` on Windows):
+   ```bash
+   keytool -genkeypair -v -keystore lumo-release.jks -alias lumo -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Lumo Launcher"
+   ```
+   Pick a strong password when asked.
+2. Copy the key file as base64:
+   - Windows PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("lumo-release.jks")) | Set-Clipboard`
+   - macOS: `base64 -i lumo-release.jks | pbcopy`
+   - Linux: `base64 -w0 lumo-release.jks`
+3. In GitHub: **Settings → Secrets and variables → Actions → New repository secret**, add
+   `SIGNING_KEYSTORE_BASE64` (the base64 text) and `SIGNING_STORE_PASSWORD` (the password).
+   Only if you changed them: `SIGNING_KEY_ALIAS` (default `lumo`) and `SIGNING_KEY_PASSWORD` (default = store password).
+4. Back up `lumo-release.jks` and the password somewhere safe, **not** in this repo. Without them you can't publish
+   updates that install over the existing app.
+
+Switching from the debug key to your key changes the app's signature, so uninstall the old Lumo once before installing
+the first release-signed APK (your launcher layout resets).
 
 Local development:
 

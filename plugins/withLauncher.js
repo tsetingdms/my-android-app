@@ -1,5 +1,7 @@
 // Turns the Expo app into an Android home-screen launcher during `expo prebuild`.
-const { AndroidConfig, withAndroidManifest, withAndroidStyles } = require('expo/config-plugins');
+const fs = require('fs');
+const path = require('path');
+const { AndroidConfig, withAndroidManifest, withAndroidStyles, withDangerousMod } = require('expo/config-plugins');
 
 function withHomeIntent(config) {
   return withAndroidManifest(config, (cfg) => {
@@ -51,6 +53,57 @@ function withWallpaperTheme(config) {
   });
 }
 
+// Keep the quick note, layout and app list out of cloud backups and phone-to-phone transfers
+// (Android 12+). `android.allowBackup: false` in app.json covers Android 11 and older.
+const DATA_EXTRACTION_RULES = `<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+  <cloud-backup>
+    <exclude domain="root" path="." />
+    <exclude domain="file" path="." />
+    <exclude domain="database" path="." />
+    <exclude domain="sharedpref" path="." />
+    <exclude domain="external" path="." />
+  </cloud-backup>
+  <device-transfer>
+    <exclude domain="root" path="." />
+    <exclude domain="file" path="." />
+    <exclude domain="database" path="." />
+    <exclude domain="sharedpref" path="." />
+    <exclude domain="external" path="." />
+  </device-transfer>
+</data-extraction-rules>
+`;
+
+// The app never goes online, so release builds drop the INTERNET permission that React Native
+// adds by default. Debug builds keep it because they load JS from the Metro dev server.
+const RELEASE_MANIFEST = `<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:tools="http://schemas.android.com/tools">
+  <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+</manifest>
+`;
+
+function withPrivacyHardening(config) {
+  config = withAndroidManifest(config, (cfg) => {
+    const app = AndroidConfig.Manifest.getMainApplicationOrThrow(cfg.modResults);
+    app.$['android:dataExtractionRules'] = '@xml/data_extraction_rules';
+    return cfg;
+  });
+  return withDangerousMod(config, [
+    'android',
+    async (cfg) => {
+      const appDir = path.join(cfg.modRequest.platformProjectRoot, 'app', 'src');
+      const xmlDir = path.join(appDir, 'main', 'res', 'xml');
+      const releaseDir = path.join(appDir, 'release');
+      await fs.promises.mkdir(xmlDir, { recursive: true });
+      await fs.promises.mkdir(releaseDir, { recursive: true });
+      await fs.promises.writeFile(path.join(xmlDir, 'data_extraction_rules.xml'), DATA_EXTRACTION_RULES);
+      await fs.promises.writeFile(path.join(releaseDir, 'AndroidManifest.xml'), RELEASE_MANIFEST);
+      return cfg;
+    },
+  ]);
+}
+
 module.exports = function withLauncher(config) {
-  return withWallpaperTheme(withHomeIntent(config));
+  return withPrivacyHardening(withWallpaperTheme(withHomeIntent(config)));
 };

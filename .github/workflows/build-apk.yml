@@ -8,31 +8,34 @@ on:
       - '**.md'
   workflow_dispatch:
 
+# Least privilege by default; only the release job can write to the repo.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: build-apk-${{ github.ref }}
   cancel-in-progress: true
 
+# Third-party actions are pinned to full commit SHAs (tag in the trailing comment).
 jobs:
+  # Runs npm/Gradle code from hundreds of dependencies, so it gets a read-only token and no secrets.
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    env:
-      APK_NAME: lumo-launcher.apk
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Node 22
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
 
       - name: Set up Java 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: 17
@@ -49,37 +52,122 @@ jobs:
           CI: 1
 
       - name: Set up Gradle cache
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
 
       - name: Build release APK
         working-directory: android
-        # The Expo template signs release builds with the bundled debug keystore,
-        # so the APK installs directly on a phone. ARM only keeps it small.
+        # ARM only keeps it small. Gradle signs with the template debug key; the release job re-signs it.
         run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
 
-      - name: Verify signature
+      - name: Collect build output
         run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/release/app-release.apk out/
+          # The public React Native debug key, used only when no release key secrets are configured.
+          cp android/app/debug.keystore out/
+
+      - name: Upload build output
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: build-output
+          path: out/
+          retention-days: 1
+          if-no-files-found: error
+
+  # Holds the signing key and the write token, and runs no project or npm code.
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download build output
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: build-output
+          path: in
+
+      - name: Sign APKs
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          if [ -n "${SIGNING_KEYSTORE_BASE64:-}" ]; then
+            KS="$RUNNER_TEMP/release.jks"
+            # Tolerate line breaks / Windows CRLF from however the secret was pasted.
+            printf '%s' "$SIGNING_KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > "$KS"
+            export KS_PASS="$SIGNING_STORE_PASSWORD"
+            export KEY_PASS="${SIGNING_KEY_PASSWORD:-$SIGNING_STORE_PASSWORD}"
+            ALIAS="${SIGNING_KEY_ALIAS:-lumo}"
+            echo "KEY_KIND=release" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Release signing secrets are not set, so the APK is signed with the public debug key. See README → Release signing."
+            KS="in/debug.keystore"
+            export KS_PASS=android KEY_PASS=android
+            ALIAS=androiddebugkey
+            echo "KEY_KIND=debug" >> "$GITHUB_ENV"
+          fi
+
+          sign() { # <input apk> <output name>
+            "$BT/zipalign" -f -P 16 4 "$1" "$RUNNER_TEMP/aligned.apk"
+            "$BT/apksigner" sign --ks "$KS" --ks-pass env:KS_PASS --ks-key-alias "$ALIAS" --key-pass env:KEY_PASS \
+              --out "dist/$2" "$RUNNER_TEMP/aligned.apk"
+            "$BT/zipalign" -c -P 16 4 "dist/$2"
+          }
+
           mkdir -p dist
-          cp android/app/build/outputs/apk/release/app-release.apk "dist/$APK_NAME"
-          APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
-          "$APKSIGNER" verify --print-certs "dist/$APK_NAME"
+          sign in/app-release.apk lumo-launcher.apk
+          # Smaller 64-bit-only APK: the same app without the 32-bit ARM libraries.
+          cp in/app-release.apk "$RUNNER_TEMP/arm64.apk"
+          zip -q -d "$RUNNER_TEMP/arm64.apk" 'lib/armeabi-v7a/*'
+          sign "$RUNNER_TEMP/arm64.apk" lumo-launcher-arm64.apk
+          rm -f "$RUNNER_TEMP/release.jks"
+
+          "$BT/apksigner" verify --print-certs dist/lumo-launcher.apk | tee "$RUNNER_TEMP/certs.txt"
+          "$BT/apksigner" verify dist/lumo-launcher-arm64.apk
+          grep -m1 'certificate SHA-256 digest' "$RUNNER_TEMP/certs.txt" | sed 's/.*digest: //' > "$RUNNER_TEMP/cert-sha256.txt"
+          (cd dist && sha256sum *.apk > SHA256SUMS.txt)
           ls -lh dist
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: lumo-launcher-apk
-          path: dist/${{ env.APK_NAME }}
+          path: dist/
           if-no-files-found: error
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           TAG="v1.0.${{ github.run_number }}"
-          gh release create "$TAG" "dist/$APK_NAME" \
+          {
+            echo "## Install"
+            echo "Download **lumo-launcher.apk** below on your Android phone and open it (allow \"Install unknown apps\" when asked)."
+            echo "**lumo-launcher-arm64.apk** is a smaller build for 64-bit phones (most phones from 2019 on)."
+            echo
+            echo "## Verify"
+            echo "Signed with the **$KEY_KIND** key. Signing certificate SHA-256:"
+            echo '```'
+            cat "$RUNNER_TEMP/cert-sha256.txt"
+            echo '```'
+            echo "File checksums (SHA-256):"
+            echo '```'
+            cat dist/SHA256SUMS.txt
+            echo '```'
+            echo "Built from ${{ github.sha }} on ${{ github.ref_name }}."
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" dist/lumo-launcher.apk dist/lumo-launcher-arm64.apk dist/SHA256SUMS.txt \
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
             --title "Lumo Launcher $TAG" \
             --latest \
-            --notes "Download **$APK_NAME** below on your Android phone and open it to install (allow \"Install unknown apps\" when asked). Built from ${{ github.sha }} on ${{ github.ref_name }}."
+            --notes-file "$RUNNER_TEMP/notes.md"

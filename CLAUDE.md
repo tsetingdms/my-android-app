@@ -14,7 +14,7 @@ npx expo export --platform android --output-dir /tmp/lumo-export   # bundle the 
 # Native build (needs JDK 17 + Android SDK with ANDROID_HOME set)
 npx expo prebuild --platform android --no-install   # generates ./android (gitignored)
 cd android && ./gradlew assembleRelease -PreactNativeArchitectures=armeabi-v7a,arm64-v8a   # Windows: gradlew.bat
-# APK: android/app/build/outputs/apk/release/app-release.apk (signed with the debug keystore)
+# APK: android/app/build/outputs/apk/release/app-release.apk (local builds are signed with the public debug key)
 adb install -r android/app/build/outputs/apk/release/app-release.apk
 
 npx expo run:android        # dev build + Metro on a USB-connected phone (USB debugging on)
@@ -67,16 +67,31 @@ node scripts/generate-icons.mjs assets   # regenerate app icon PNGs
 - **Gestures**: the home `PanResponder` claims vertical moves in the *capture* phase only on page 0 and only when the
   drawer is closed, so the widgets page can scroll. Drawer closes via header drag, Back, or the Home button.
 - Back button never exits the launcher. Fonts use Android family names (`sans-serif-thin`, `-light`, `-medium`, `-black`).
-- Package id: `com.tsetingdms.lumolauncher`. Release builds are signed with the template's `debug.keystore` (same key
-  every build, so updates install over the old version). Bump `android.versionCode` in `app.json` for real releases.
+- Package id: `com.tsetingdms.lumolauncher`. Gradle always signs with the template's public `debug.keystore`; CI
+  re-signs with the private release key from GitHub Secrets (see CI below). Bump `android.versionCode` in `app.json`
+  for real releases.
+- **Security/privacy settings to keep**: `android.allowBackup: false` (app.json) plus `data_extraction_rules.xml`
+  (written by the plugin) keep the note/layout out of backups; the plugin writes `src/release/AndroidManifest.xml`
+  to remove INTERNET from release builds — the app must stay offline, so don't add network features without
+  revisiting this. Debug builds keep INTERNET for Metro.
 
 ## CI / releases
 
 `.github/workflows/build-apk.yml` runs on push to `main` (ignores `**.md`-only changes) and on manual
-`workflow_dispatch`: Node 22, Java 17 (temurin), `npm ci`, typecheck, `expo prebuild`, `./gradlew assembleRelease`
-(armeabi-v7a + arm64-v8a), `apksigner verify`, uploads the artifact and creates a GitHub Release `v1.0.<run_number>`
-marked latest. Stable download link:
-https://github.com/tsetingdms/my-android-app/releases/latest/download/lumo-launcher.apk
+`workflow_dispatch`, as two jobs:
+
+- `build` — `contents: read`, no secrets, `persist-credentials: false`: Node 22, Java 17 (temurin), `npm ci`,
+  typecheck, `expo prebuild`, `./gradlew assembleRelease` (armeabi-v7a + arm64-v8a). Uploads `app-release.apk` +
+  the public `debug.keystore` as a 1-day `build-output` artifact.
+- `release` — `contents: write`, the only job that sees signing secrets; runs no npm/Gradle code. `zipalign -P 16` +
+  `apksigner` sign `lumo-launcher.apk` (universal) and `lumo-launcher-arm64.apk` (32-bit libs stripped), with
+  `SIGNING_KEYSTORE_BASE64` / `SIGNING_STORE_PASSWORD` (optional `SIGNING_KEY_ALIAS`, default `lumo`;
+  `SIGNING_KEY_PASSWORD`, default = store password), falling back to the debug key with a warning. Publishes
+  GitHub Release `v1.0.<run_number>` (latest) with cert fingerprint + `SHA256SUMS.txt`.
+
+All third-party actions are pinned to commit SHAs (tag in a comment); update both together. setup-gradle uses
+`cache-provider: basic` (open-source cache). Stable download links:
+https://github.com/tsetingdms/my-android-app/releases/latest/download/lumo-launcher.apk and `…/lumo-launcher-arm64.apk`
 
 No Expo account / EAS is used — keep it that way.
 
