@@ -22,4 +22,40 @@
       <category android:name="android.intent.category.LAUNCHER" />
     </intent>
   </queries>
+
+  <application>
+    <!-- Edge-panel clipboard: hands one picture at a time to the app the user sends it to (not exported). -->
+    <provider
+      android:name="expo.modules.launcher.ClipFileProvider"
+      android:authorities="${applicationId}.clipfiles"
+      android:exported="false"
+      android:grantUriPermissions="true">
+      <meta-data
+        android:name="android.support.FILE_PROVIDER_PATHS"
+        android:resource="@xml/lumo_clip_paths" />
+    </provider>
+
+    <!-- Share → "Lumo clipboard": saves shared text/pictures to the edge-panel clipboard. Invisible,
+         no task of its own; it is switched off while the clipboard setting is off. -->
+    <activity
+      android:name="expo.modules.launcher.ClipShareActivity"
+      android:label="Lumo clipboard"
+      android:exported="true"
+      android:excludeFromRecents="true"
+      android:noHistory="true"
+      android:taskAffinity=""
+      android:theme="@android:style/Theme.Translucent.NoTitleBar">
+      <intent-filter>
+        <action android:name="android.intent.action.SEND" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:mimeType="image/*" />
+        <data android:mimeType="text/plain" />
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.SEND_MULTIPLE" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:mimeType="image/*" />
+      </intent-filter>
+    </activity>
+  </application>
 </manifest>

@@ -247,6 +247,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (ready) Launcher.setLockScreenEnabled(settings.lockEnabled);
   }, [ready, settings.lockEnabled]);
 
+  // Clipboard saving runs natively (it must happen while the home screen has focus); it only
+  // exists inside the edge panel, so it's off whenever the panel is.
+  const clipboardOn = settings.edgePanel && settings.clipboard;
+  useEffect(() => {
+    if (ready) Launcher.setClipboardOptions(clipboardOn, settings.clipboardKeep);
+  }, [ready, clipboardOn, settings.clipboardKeep]);
   useEffect(() => {
     if (ready) lastSettings = settings;
   }, [ready, settings]);

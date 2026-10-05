@@ -1,11 +1,29 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Image, PanResponder, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Alert,
+  Animated,
+  BackHandler,
+  FlatList,
+  Image,
+  PanResponder,
+  Pressable,
+  StyleSheet,
+  Text,
+  ToastAndroid,
+  Vibration,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 
 import * as Launcher from '../../modules/launcher';
+import { useClips, type ClipItem } from '../clipboard';
 import type { App } from '../store';
 import { useLook, useStore } from '../store';
 import { shapeStyle, type EdgeHandle as HandlePosition } from '../theme';
+import { ClipStrip, ClipThumb, ClipTile, DropTargets, type Rect } from './clipboard/ClipParts';
+import { ClipSheet } from './clipboard/ClipSheet';
+import { ImageEditor } from './clipboard/ImageEditor';
 import { Glass } from './Glass';
 import { Tilt } from './Tilt';
 import { PanelBackdrop } from './Wallpaper';
@@ -78,7 +96,12 @@ type PanelProps = {
   onOpenDrawer: () => void;
 };
 
-/** Glass side panel with tools and favourite apps (all offline). */
+type Mode = 'main' | 'clips';
+const GHOST = 64;
+/** Width of a clipboard tile inside the panel (panel minus the glass padding and border). */
+const TILE_W = EDGE_PANEL_WIDTH - 18;
+
+/** Glass side panel with tools, favourite apps and the clipboard (all offline). */
 export const EdgePanel = memo(function EdgePanel({
   progress,
   open,
@@ -97,12 +120,55 @@ export const EdgePanel = memo(function EdgePanel({
   const latest = useRef({ onClose, onSettle, onDragStart });
   latest.current = { onClose, onSettle, onDragStart };
 
+  // Clipboard
+  const [clips, refreshClips] = useClips(settings.clipboard);
+  const [mode, setMode] = useState<Mode>('main');
+  const [sheetId, setSheetId] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [drag, setDrag] = useState<ClipItem | null>(null);
+  const [hover, setHover] = useState<string | null>(null);
+  const dragRef = useRef<ClipItem | null>(null);
+  const draggingRef = useRef(false);
+  const hoverRef = useRef<string | null>(null);
+  const targets = useRef(new Map<string, Rect>());
+  const ghost = useRef(new Animated.ValueXY()).current;
+
   useEffect(() => {
     if (!open) return;
     // Cheap cached flag (not the full system state), so opening doesn't stall a frame.
     setTorch(Launcher.isTorchOn());
     return Launcher.addTorchListener(setTorch);
   }, [open]);
+
+  const endDrag = useCallback(() => {
+    dragRef.current = null;
+    draggingRef.current = false;
+    hoverRef.current = null;
+    targets.current.clear();
+    setDrag(null);
+    setHover(null);
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      refreshClips();
+      return;
+    }
+    setMode('main');
+    setSheetId(null);
+    setEditId(null);
+    endDrag();
+  }, [open, refreshClips, endDrag]);
+
+  // Back leaves the clipboard list before it closes the panel.
+  useEffect(() => {
+    if (mode !== 'clips') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setMode('main');
+      return true;
+    });
+    return () => sub.remove();
+  }, [mode]);
 
   const panelApps = useMemo(() => {
     const pinned = layout.edge.map((k) => appsByKey.get(k)).filter((a): a is App => !!a);
@@ -132,6 +198,94 @@ export const EdgePanel = memo(function EdgePanel({
       }),
     [progress]
   );
+
+  const closeSoon = useCallback(() => {
+    setTimeout(() => latest.current.onClose(), 400);
+  }, []);
+
+  // Dropping a lifted clip: on an app (sends it there), Copy, or Share….
+  const drop = (key: string | null) => {
+    const clip = dragRef.current;
+    endDrag();
+    if (!clip || !key) return;
+    if (key === 'copy') {
+      if (Launcher.copyClip(clip.id)) ToastAndroid.show('Copied — paste it anywhere', ToastAndroid.SHORT);
+      return;
+    }
+    const app = key === 'share' ? null : panelApps.find((a) => a.key === key);
+    if (app === undefined) return;
+    Launcher.shareClip(clip.id, app ? app.packageName : null);
+    closeSoon();
+  };
+  const dropRef = useRef(drop);
+  dropRef.current = drop;
+
+  // While a clip is lifted, this captures the finger anywhere on screen and moves the ghost.
+  const dragPan = useMemo(() => {
+    const hitTest = (x: number, y: number) => {
+      for (const [key, r] of targets.current) {
+        if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return key;
+      }
+      return null;
+    };
+    return PanResponder.create({
+      onMoveShouldSetPanResponderCapture: () => dragRef.current != null,
+      onPanResponderGrant: () => {
+        draggingRef.current = true;
+      },
+      onPanResponderMove: (_, g) => {
+        ghost.setValue({ x: g.moveX - GHOST / 2, y: g.moveY - GHOST / 2 });
+        const hit = hitTest(g.moveX, g.moveY);
+        if (hit !== hoverRef.current) {
+          hoverRef.current = hit;
+          setHover(hit);
+        }
+      },
+      onPanResponderRelease: () => dropRef.current(hoverRef.current),
+      onPanResponderTerminate: () => endDrag(),
+      onPanResponderTerminationRequest: () => false,
+    });
+  }, [ghost, endDrag]);
+
+  const lift = useCallback(
+    (clip: ClipItem, x: number, y: number) => {
+      dragRef.current = clip;
+      draggingRef.current = false;
+      ghost.setValue({ x: x - GHOST / 2, y: y - GHOST / 2 });
+      Vibration.vibrate(12);
+      setDrag(clip);
+    },
+    [ghost]
+  );
+  // Let go without moving after the long-press: nothing to drop.
+  const release = useCallback(() => {
+    if (dragRef.current && !draggingRef.current) endDrag();
+  }, [endDrag]);
+  const measureTarget = useCallback((key: string, rect: Rect) => {
+    targets.current.set(key, rect);
+  }, []);
+
+  const openClips = useCallback(() => setMode('clips'), []);
+  const openSheet = useCallback((clip: ClipItem) => setSheetId(clip.id), []);
+  const closeSheet = useCallback(() => setSheetId(null), []);
+  const openEditor = useCallback((clip: ClipItem) => setEditId(clip.id), []);
+  const closeEditor = useCallback(() => setEditId(null), []);
+  const onEdited = useCallback(
+    (id: string) => {
+      refreshClips();
+      setEditId(null);
+      setSheetId(id);
+    },
+    [refreshClips]
+  );
+  const clearClips = () =>
+    Alert.alert('Clear the clipboard?', 'Pinned items stay.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear', style: 'destructive', onPress: () => Launcher.clearClips() },
+    ]);
+
+  const sheetClip = sheetId ? clips.find((c) => c.id === sheetId) ?? null : null;
+  const editClip = editId ? clips.find((c) => c.id === editId) ?? null : null;
 
   const { panelStyle, scrimOpacity } = useMemo(
     () => ({
@@ -171,7 +325,7 @@ export const EdgePanel = memo(function EdgePanel({
   ];
 
   return (
-    <Animated.View pointerEvents={open ? 'auto' : 'none'} style={StyleSheet.absoluteFill}>
+    <Animated.View {...dragPan.panHandlers} pointerEvents={open ? 'auto' : 'none'} style={StyleSheet.absoluteFill}>
       <Animated.View
         renderToHardwareTextureAndroid={animating}
         style={[StyleSheet.absoluteFill, styles.scrim, { opacity: scrimOpacity }]}
@@ -191,59 +345,118 @@ export const EdgePanel = memo(function EdgePanel({
           />
         </View>
         <Glass radius={30} style={styles.panelGlass}>
-          <Text style={[styles.section, { color: palette.subtext }]}>Tools</Text>
-          <View style={styles.grid}>
-            {tools.map((t) => (
-              <Pressable key={t.key} onPress={t.run} style={styles.item}>
-                <Tilt style={styles.toolTilt} radius={23} max={14} onPress={t.run}>
-                  <View style={[styles.tool, { backgroundColor: t.active ? palette.accent : palette.chipBg }]}>
-                    <Ionicons name={t.icon} size={22} color={t.active ? '#fff' : palette.text} />
-                  </View>
-                </Tilt>
-                <Text numberOfLines={1} style={[styles.label, { color: palette.text }]}>
-                  {t.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          <View style={[styles.divider, { backgroundColor: palette.separator }]} />
-          <Text style={[styles.section, { color: palette.subtext }]}>Apps</Text>
-          <View style={styles.grid}>
-            {panelApps.map((app) => (
-              <Pressable
-                key={app.key}
-                onPress={() => onLaunch(app)}
-                onLongPress={() => onLongPressApp(app)}
-                delayLongPress={350}
-                style={({ pressed }) => [styles.item, pressed && styles.pressed]}
-              >
-                <View style={[styles.appIcon, iconShape]}>
-                  {app.icon ? <Image source={{ uri: app.icon }} style={styles.appImage} fadeDuration={0} /> : null}
-                </View>
-                <Text numberOfLines={1} style={[styles.label, { color: palette.text }]}>
-                  {app.label}
-                </Text>
-              </Pressable>
-            ))}
-            <Pressable onPress={onOpenDrawer} style={({ pressed }) => [styles.item, pressed && styles.pressed]}>
-              <View style={[styles.tool, { backgroundColor: palette.accent }]}>
-                <Ionicons name="apps" size={20} color="#fff" />
+          {mode === 'clips' ? (
+            <View style={styles.fill}>
+              <View style={styles.clipsTop}>
+                <Pressable hitSlop={10} onPress={() => setMode('main')} style={styles.clipsBack}>
+                  <Ionicons name="chevron-back" size={18} color={palette.text} />
+                </Pressable>
+                <Text style={[styles.clipsTitle, { color: palette.text }]}>Clipboard</Text>
+                {clips.some((c) => !c.pinned) && (
+                  <Pressable hitSlop={10} onPress={clearClips} style={styles.clipsBack}>
+                    <Ionicons name="trash-outline" size={16} color={palette.subtext} />
+                  </Pressable>
+                )}
               </View>
-              <Text numberOfLines={1} style={[styles.label, { color: palette.text }]}>
-                More
-              </Text>
-            </Pressable>
-          </View>
-          {layout.edge.length === 0 && (
-            <Text style={[styles.hint, { color: palette.subtext }]}>Long-press any app → Add to edge panel</Text>
+              {clips.length > 0 ? (
+                <>
+                  <Text style={[styles.clipsHint, { color: palette.subtext }]}>Tap to open · hold, then drag onto an app</Text>
+                  <FlatList
+                    data={clips}
+                    keyExtractor={clipKey}
+                    scrollEnabled={!drag}
+                    showsVerticalScrollIndicator={false}
+                    initialNumToRender={6}
+                    contentContainerStyle={styles.clipsList}
+                    renderItem={({ item }) => (
+                      <ClipTile clip={item} width={TILE_W} onOpen={openSheet} onLift={lift} onRelease={release} />
+                    )}
+                  />
+                </>
+              ) : (
+                <Text style={[styles.clipsEmpty, { color: palette.subtext }]}>
+                  Nothing here yet.{'\n\n'}Copy text or a picture in any app, then come back to the home screen.
+                  {'\n\n'}For pictures you can't copy (like in WhatsApp), tap Share → Lumo clipboard.
+                </Text>
+              )}
+              {drag && <DropTargets apps={panelApps} hover={hover} iconShape={iconShape} onMeasure={measureTarget} />}
+            </View>
+          ) : (
+            <>
+              <Text style={[styles.section, { color: palette.subtext }]}>Tools</Text>
+              <View style={styles.grid}>
+                {tools.map((t) => (
+                  <Pressable key={t.key} onPress={t.run} style={styles.item}>
+                    <Tilt style={styles.toolTilt} radius={23} max={14} onPress={t.run}>
+                      <View style={[styles.tool, { backgroundColor: t.active ? palette.accent : palette.chipBg }]}>
+                        <Ionicons name={t.icon} size={22} color={t.active ? '#fff' : palette.text} />
+                      </View>
+                    </Tilt>
+                    <Text numberOfLines={1} style={[styles.label, { color: palette.text }]}>
+                      {t.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <View style={[styles.divider, { backgroundColor: palette.separator }]} />
+              <Text style={[styles.section, { color: palette.subtext }]}>Apps</Text>
+              <View style={styles.grid}>
+                {panelApps.map((app) => (
+                  <Pressable
+                    key={app.key}
+                    onPress={() => onLaunch(app)}
+                    onLongPress={() => onLongPressApp(app)}
+                    delayLongPress={350}
+                    style={({ pressed }) => [styles.item, pressed && styles.pressed]}
+                  >
+                    <View style={[styles.appIcon, iconShape]}>
+                      {app.icon ? <Image source={{ uri: app.icon }} style={styles.appImage} fadeDuration={0} /> : null}
+                    </View>
+                    <Text numberOfLines={1} style={[styles.label, { color: palette.text }]}>
+                      {app.label}
+                    </Text>
+                  </Pressable>
+                ))}
+                <Pressable onPress={onOpenDrawer} style={({ pressed }) => [styles.item, pressed && styles.pressed]}>
+                  <View style={[styles.tool, { backgroundColor: palette.accent }]}>
+                    <Ionicons name="apps" size={20} color="#fff" />
+                  </View>
+                  <Text numberOfLines={1} style={[styles.label, { color: palette.text }]}>
+                    More
+                  </Text>
+                </Pressable>
+              </View>
+              {settings.clipboard && (
+                <>
+                  <View style={[styles.divider, { backgroundColor: palette.separator }]} />
+                  <ClipStrip clips={clips} onPress={openClips} />
+                </>
+              )}
+              {layout.edge.length === 0 && (
+                <Text style={[styles.hint, { color: palette.subtext }]}>Long-press any app → Add to edge panel</Text>
+              )}
+            </>
           )}
         </Glass>
       </Animated.View>
+
+      {drag && (
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.ghost, { transform: [...ghost.getTranslateTransform(), { rotate: '-4deg' }] }]}
+        >
+          <ClipThumb clip={drag} size={GHOST} radius={16} />
+        </Animated.View>
+      )}
+
+      <ClipSheet clip={sheetClip} apps={panelApps} onClose={closeSheet} onEdit={openEditor} onSent={closeSoon} />
+      <ImageEditor clip={editClip} onClose={closeEditor} onSaved={onEdited} />
     </Animated.View>
   );
 });
 
+const clipKey = (clip: ClipItem) => clip.id;
 const styles = StyleSheet.create({
   handleArea: {
     position: 'absolute',
@@ -272,8 +485,50 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     overflow: 'hidden',
   },
-  panelGlass: {
+  fill: {
     flex: 1,
+  },
+  ghost: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    opacity: 0.92,
+    elevation: 10,
+    borderRadius: 16,
+  },
+  clipsTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 32,
+    marginBottom: 2,
+  },
+  clipsBack: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clipsTitle: {
+    flex: 1,
+    fontSize: 15,
+    fontFamily: 'sans-serif-medium',
+  },
+  clipsHint: {
+    fontSize: 10.5,
+    marginLeft: 4,
+    marginBottom: 8,
+  },
+  clipsList: {
+    gap: 8,
+    paddingBottom: 8,
+  },
+  clipsEmpty: {
+    fontSize: 12,
+    lineHeight: 17,
+    paddingHorizontal: 6,
+    marginTop: 12,
+  },
+  panelGlass: {    flex: 1,
     paddingHorizontal: 8,
     paddingTop: 10,
     paddingBottom: 8,

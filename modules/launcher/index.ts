@@ -53,6 +53,20 @@ export type LockScreenStatus = {
   notificationsEnabled: boolean;
 };
 
+/** An edge-panel clipboard item (stored on the phone by the native module). */
+export type ClipItem = {
+  id: string;
+  kind: 'text' | 'image';
+  text: string | null;
+  /** file:// URI of the saved picture. */
+  uri: string | null;
+  width: number;
+  height: number;
+  /** ms timestamp of when it was copied (or last brought back to the top). */
+  time: number;
+  pinned: boolean;
+};
+
 export type SettingsPanel =
   | 'wifi'
   | 'internet'
@@ -70,6 +84,7 @@ type LauncherEvents = {
   onAppsChanged(event: { action: string; packageName: string }): void;
   onHomePressed(): void;
   onTorchChanged(event: { on: boolean }): void;
+  onClipsChanged(): void;
 };
 
 declare class LauncherNativeModule extends NativeModule<LauncherEvents> {
@@ -108,6 +123,15 @@ declare class LauncherNativeModule extends NativeModule<LauncherEvents> {
   testLockScreen(): boolean;
   openOverlaySettings(): boolean;
   requestNotificationPermission(): boolean;
+  setClipboardOptions(enabled: boolean, keepHours: number): Promise<void>;
+  getClips(): ClipItem[];
+  copyClip(id: string): boolean;
+  shareClip(id: string, packageName: string | null): boolean;
+  pinClip(id: string, pinned: boolean): boolean;
+  updateClipText(id: string, text: string): boolean;
+  deleteClip(id: string): boolean;
+  clearClips(): boolean;
+  saveClipEdit(id: string, edit: string): Promise<string | null>;
 }
 
 // Optional so the JS still loads (with empty data) outside a native Android build.
@@ -186,6 +210,31 @@ export function getBattery(): BatteryInfo {
 
 export function getDeviceStats(): Promise<DeviceStats | null> {
   return native ? native.getDeviceStats() : Promise.resolve(null);
+}
+
+// Edge-panel clipboard
+
+/** Turns clipboard saving (and the "Lumo clipboard" share entry) on or off; keepHours 0 = keep forever. */
+export function setClipboardOptions(enabled: boolean, keepHours: number) {
+  native?.setClipboardOptions(enabled, keepHours).catch(() => {});
+}
+export const getClips = (): ClipItem[] => native?.getClips() ?? [];
+/** Puts an item back on the phone's clipboard, ready to paste. */
+export const copyClip = (id: string) => native?.copyClip(id) ?? false;
+/** Sends an item to one app (true) or, without a package or if that app can't take it, via the share sheet. */
+export const shareClip = (id: string, packageName: string | null = null) => native?.shareClip(id, packageName) ?? false;
+export const pinClip = (id: string, pinned: boolean) => native?.pinClip(id, pinned) ?? false;
+export const updateClipText = (id: string, text: string) => native?.updateClipText(id, text) ?? false;
+export const deleteClip = (id: string) => native?.deleteClip(id) ?? false;
+/** Removes every item except pinned ones. */
+export const clearClips = () => native?.clearClips() ?? false;
+/** Saves an edited copy of a picture as a new item; resolves to its id (null if it failed). */
+export function saveClipEdit(id: string, edit: string): Promise<string | null> {
+  return native ? native.saveClipEdit(id, edit) : Promise.resolve(null);
+}
+export function addClipsListener(listener: () => void) {
+  const sub = native?.addListener('onClipsChanged', listener);
+  return () => sub?.remove();
 }
 
 export function addAppsChangedListener(listener: () => void) {

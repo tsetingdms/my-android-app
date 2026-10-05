@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the edge-panel clipboard folder can be handed to other apps (one grant per send or copy). -->
+<paths>
+  <files-path name="clipboard" path="clipboard/" />
+</paths>

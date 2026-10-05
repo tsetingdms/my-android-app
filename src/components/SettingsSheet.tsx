@@ -405,6 +405,29 @@ export const SettingsSheet = memo(function SettingsSheet({ visible, onClose }: P
                         { value: 'lower', label: 'Lower' },
                       ]}
                     />
+                    <Toggle
+                      label="Clipboard in edge panel"
+                      hint="Keeps text and pictures you copy (saved when you come back to the home screen) and adds “Lumo clipboard” to the Share menu. Stays on this phone."
+                      value={settings.clipboard}
+                      onChange={set('clipboard')}
+                    />
+                    {settings.clipboard && (
+                      <>
+                        <Label text="Keep clipboard items" />
+                        <Choice<number>
+                          value={settings.clipboardKeep}
+                          onChange={set('clipboardKeep')}
+                          options={[
+                            { value: 1, label: '1 hour' },
+                            { value: 24, label: '1 day' },
+                            { value: 168, label: '1 week' },
+                            { value: 0, label: 'Always' },
+                          ]}
+                        />
+                        <Text style={[styles.hint, { color: palette.subtext }]}>Pinned items are always kept.</Text>
+                        <Row label="Clear clipboard" onPress={() => Launcher.clearClips()} destructive />
+                      </>
+                    )}
                   </>
                 )}
               </Section>

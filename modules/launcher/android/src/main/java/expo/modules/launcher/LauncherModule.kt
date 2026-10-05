@@ -5,6 +5,7 @@ import android.app.ActivityManager
 import android.app.WallpaperManager
 import android.app.role.RoleManager
 import android.content.BroadcastReceiver
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -20,16 +21,21 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.os.StatFs
 import android.provider.AlarmClock
 import android.provider.MediaStore
 import android.provider.Settings
+import android.view.View
+import android.view.ViewTreeObserver
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.File
 import java.io.FileOutputStream
+import java.lang.ref.WeakReference
 
 class LauncherModule : Module() {
   private val context: Context
@@ -39,10 +45,19 @@ class LauncherModule : Module() {
   private var pendingPhoto: Promise? = null
   private var pendingPhotoSize = 1080
 
+  // Edge-panel clipboard: Android 10+ only allows reading the clipboard while we have focus, so the
+  // home window's focus changes (and clip changes while focused) trigger a capture.
+  private var clipWatchView: WeakReference<View>? = null
+  private var clipListening = false
+  private val clipFocusListener = ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
+    if (hasFocus) captureClipboard()
+  }
+  private val clipChangedListener = ClipboardManager.OnPrimaryClipChangedListener { captureClipboard() }
+
   override fun definition() = ModuleDefinition {
     Name("Launcher")
 
-    Events("onAppsChanged", "onHomePressed", "onTorchChanged")
+    Events("onAppsChanged", "onHomePressed", "onTorchChanged", "onClipsChanged")
 
     OnCreate {
       registerPackageReceiver()
@@ -50,11 +65,18 @@ class LauncherModule : Module() {
         if (LockScreen.isEnabled(ctx)) LockScreen.register(ctx)
         SystemControls.watchTorch(ctx) { on -> sendEvent("onTorchChanged", Bundle().apply { putBoolean("on", on) }) }
       }
+      ClipboardStore.onChange = { sendEvent("onClipsChanged", Bundle()) }
+    }
+
+    OnActivityEntersForeground {
+      watchClipboard()
     }
 
     OnDestroy {
       unregisterPackageReceiver()
       appContext.reactContext?.let { SystemControls.unwatchTorch(it) }
+      ClipboardStore.onChange = null
+      unwatchClipboard()
     }
 
     OnActivityResult { _, payload ->
@@ -191,6 +213,47 @@ class LauncherModule : Module() {
 
     // endregion
 
+    // region Clipboard
+
+    AsyncFunction("setClipboardOptions") { enabled: Boolean, keepHours: Int ->
+      ClipboardStore.setOptions(context, enabled, keepHours)
+      if (enabled) watchClipboard() else unwatchClipboard()
+    }.runOnQueue(Queues.MAIN)
+
+    Function("getClips") {
+      ClipboardStore.list(context)
+    }
+
+    Function("copyClip") { id: String ->
+      ClipboardStore.copy(context, id)
+    }
+
+    Function("shareClip") { id: String, packageName: String? ->
+      shareClip(id, packageName)
+    }
+
+    Function("pinClip") { id: String, pinned: Boolean ->
+      ClipboardStore.setPinned(context, id, pinned)
+    }
+
+    Function("updateClipText") { id: String, text: String ->
+      ClipboardStore.updateText(context, id, text)
+    }
+
+    Function("deleteClip") { id: String ->
+      ClipboardStore.remove(context, id)
+    }
+
+    Function("clearClips") {
+      ClipboardStore.clear(context)
+    }
+
+    AsyncFunction("saveClipEdit") { id: String, edit: String ->
+      ClipboardStore.saveEdit(context, id, edit)
+    }
+
+    // endregion
+
     // region Lock screen
 
     Function("setLockScreenEnabled") { enabled: Boolean ->
@@ -243,6 +306,72 @@ class LauncherModule : Module() {
       wallpaperColor()
     }
   }
+
+  // region Clipboard
+
+  private fun watchClipboard() {
+    val ctx = appContext.reactContext ?: return
+    if (!ClipboardStore.isEnabled(ctx)) return
+    val activity = appContext.currentActivity
+    if (activity != null && activity !is LockScreenActivity) {
+      val decor = activity.window?.decorView
+      if (decor != null && clipWatchView?.get() !== decor) {
+        detachClipFocusListener()
+        decor.viewTreeObserver.addOnWindowFocusChangeListener(clipFocusListener)
+        clipWatchView = WeakReference(decor)
+      }
+      if (decor?.hasWindowFocus() == true) captureClipboard()
+    }
+    if (!clipListening) {
+      try {
+        (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)?.addPrimaryClipChangedListener(clipChangedListener)
+        clipListening = true
+      } catch (e: Exception) {
+        clipListening = false
+      }
+    }
+  }
+
+  private fun detachClipFocusListener() {
+    val observer = clipWatchView?.get()?.viewTreeObserver
+    if (observer != null && observer.isAlive) observer.removeOnWindowFocusChangeListener(clipFocusListener)
+    clipWatchView = null
+  }
+
+  private fun unwatchClipboard() {
+    val run = Runnable {
+      detachClipFocusListener()
+      if (clipListening) {
+        try {
+          val manager = appContext.reactContext?.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+          manager?.removePrimaryClipChangedListener(clipChangedListener)
+        } catch (e: Exception) {
+          // Already gone.
+        }
+        clipListening = false
+      }
+    }
+    if (Looper.myLooper() == Looper.getMainLooper()) run.run() else Handler(Looper.getMainLooper()).post(run)
+  }
+
+  private fun captureClipboard() {
+    val ctx = appContext.reactContext ?: return
+    try {
+      ClipboardStore.capture(ctx)
+    } catch (e: Exception) {
+      // Never let a clipboard problem crash the home screen.
+    }
+  }
+
+  /** Sends an item straight to [packageName] (e.g. WhatsApp's chat picker), or through the share sheet. */
+  private fun shareClip(id: String, packageName: String?): Boolean {
+    val send = ClipboardStore.shareIntent(context, id) ?: return false
+    if (packageName != null && start(Intent(send).setPackage(packageName))) return true
+    start(Intent.createChooser(send, null))
+    return false
+  }
+
+  // endregion
 
   // region Apps
 

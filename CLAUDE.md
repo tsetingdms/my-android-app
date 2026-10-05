@@ -3,7 +3,7 @@
 Android home-screen launcher for budget phones (target device: **Moto E40**, Android 11, 720×1600, Unisoc T700, 4 GB RAM).
 Expo SDK 57 (React Native 0.86, New Architecture, Hermes) + TypeScript, plus a local Kotlin Expo module.
 Everything is stored on the phone (AsyncStorage); there is no backend, no account and no network use.
-App version lives in `app.json` (`expo.version` 1.1.2, `android.versionCode` 4).
+App version lives in `app.json` (`expo.version` 1.2.0, `android.versionCode` 5).
 
 ## Repo & branches
 
@@ -58,16 +58,18 @@ node scripts/generate-wallpapers.mjs     # regenerate theme wallpapers in assets
   (one-tap presets = settings patches), `CLOCK_FACES`, `CLOCK_COLORS`, icon shapes, `makePalette()` (glass colors per
   style: liquid / frosted / clear / solid), drawer categories.
 - `src/hooks.ts` — minute clock, polled battery / device stats, date/time formatting.
-- `src/components/`
+- `src/clipboard.ts` — `useClips(enabled)` (edge-panel clipboard list from native, pinned first, re-renders only on
+  change), `timeAgo`, `contrastOn`.- `src/components/`
   - `Glass` — the "liquid glass" surface; `frosted` adds a pre-blurred wallpaper backdrop (static cards only).
   - `Wallpaper` (+ `PanelBackdrop` for overlays, `ScreenSizeContext`), `ClockFace` (11 designs shared by home, lock
     screen and pickers; `resolveClockColor`), `Tilt` (3D press feedback), `AppIcon` (+ `useIconLook`).
   - `AppDrawer` — grid / pages / list layouts, A–Z bar, search with web/Play Store fallbacks, RNGH drag-to-close.
-  - `ControlPanel`, `EdgePanel` (+ `EdgeHandle`, `EDGE_APP_LIMIT` = 7), `HomeParts` (home grid, dock with
+  - `ControlPanel`, `EdgePanel` (+ `EdgeHandle`, `EDGE_APP_LIMIT` = 7; clipboard corner and list, see below), `HomeParts` (home grid, dock with
     `DOCK_LIMIT` = 5, search pill, page dots, default-launcher banner), `ActionsSheet` (long-press menu),
     `SettingsSheet` (Customize: themes, wallpaper, clocks, lock screen, gestures, icons, drawer, hidden apps).
   - `widgets/` — clock widget, battery/date glance cards, widgets page (quick controls, device meters, calendar, note).
-- `src/lock/LockScreen.tsx` — the `lock` component. It runs in a separate React root (no store): it starts from
+  - `clipboard/` — `ClipParts` (thumb, edge-panel strip, list tile, `DropTargets`), `ClipSheet` (send to app / copy /
+    edit / pin / delete), `ImageEditor` (draw, text, crop; react-native-svg preview).- `src/lock/LockScreen.tsx` — the `lock` component. It runs in a separate React root (no store): it starts from
   `lastKnownSettings()` and falls back to AsyncStorage, shows the lock clock face, swipe up → `Launcher.unlockScreen()`,
   torch/camera buttons.
 - `assets/fonts/` — 7 OFL clock fonts embedded by the `expo-font` plugin (list + licenses in its README);
@@ -82,7 +84,9 @@ node scripts/generate-wallpapers.mjs     # regenerate theme wallpapers in assets
   - `SystemControls.kt` — control-panel state and actions: volume, brightness / auto-rotate (only with the
     user-granted WRITE_SETTINGS), ringer, media keys (`dispatchMediaKeyEvent`, no notification access), torch tracking.
   - `WallpaperPhoto.kt` — saves a picked photo downscaled + EXIF-rotated to `filesDir/wallpapers` (keeps only one).
-  - `LockScreen.kt` — `LockScreen` (screen-off receiver, on/off in SharedPreferences `lumo_lock_screen`) and
+  - `ClipboardStore.kt` — edge-panel clipboard: capture, `filesDir/clipboard` (+ `index.json`), dedupe, expiry, copy,
+    share intents; `ClipFileProvider` (authority `<package>.clipfiles`). `ClipEditor.kt` renders picture edits.
+    `ClipShareActivity.kt` — Share → "Lumo clipboard" (invisible, disabled while the setting is off).  - `LockScreen.kt` — `LockScreen` (screen-off receiver, on/off in SharedPreferences `lumo_lock_screen`) and
     `LockScreenActivity` (a `ReactActivity` hosting `lock` over the keyguard). The module's `build.gradle` depends on
     `react-android` for this.
   - `android/src/main/AndroidManifest.xml` — `<queries>` for LAUNCHER apps and the module's permissions (see below).
@@ -95,8 +99,8 @@ node scripts/generate-wallpapers.mjs     # regenerate theme wallpapers in assets
 ## Data & settings
 
 - AsyncStorage keys: `lumo.settings.v1`, `lumo.layout.v1`, `lumo.apps.v1` (cached app list for instant start),
-  `lumo.note.v1` (widgets-page note).
-- Saved settings are loaded as `{ ...DEFAULT_SETTINGS, ...saved }`, so a **new setting** only needs the type field
+  `lumo.note.v1` (widgets-page note). The clipboard is stored natively, not in AsyncStorage: `filesDir/clipboard`
+  (pictures + `index.json`) and SharedPreferences `lumo_clipboard` (on/off, keep hours, last clip timestamp).- Saved settings are loaded as `{ ...DEFAULT_SETTINGS, ...saved }`, so a **new setting** only needs the type field
   and a default. Renaming or changing the meaning of a key needs a migration in `StoreProvider`'s load effect (old
   keys such as `swipeDownNotifications` may still sit in saved data; they're harmless).
 - `layout.home/dock/edge` hold app keys `package/activity`; uninstalled apps are pruned automatically.
@@ -144,6 +148,21 @@ node scripts/generate-wallpapers.mjs     # regenerate theme wallpapers in assets
   screen now"). It never covers a call or ringing, finishes when a secure keyguard is unlocked by
   fingerprint/face (USER_PRESENT), and finishes in `onStop` only if the screen is on (screen-off must not kill it).
   Both React surfaces share one JS runtime, so the main app's `BackHandler` also receives Back presses from it.
+- **Clipboard** (setting `clipboard`, default on; only while the edge panel is on; `clipboardKeep` hours, 0 = forever;
+  max 30 unpinned items, pinned kept): Android 10+ only lets the focused app read the clipboard, so `LauncherModule`
+  captures on the home window's focus gain (`ViewTreeObserver` focus listener, attached in
+  `OnActivityEntersForeground`, never on `LockScreenActivity`) and on clip changes while focused. Copying several
+  things without returning home saves only the last one. `ClipDescription.timestamp` skips clips already seen (the
+  description doesn't trigger Android 12+'s "pasted" toast); clips flagged `IS_SENSITIVE` (Android 13+) are skipped.
+  Picture clips are copied immediately (the grant ends when the clip changes), deduped by SHA-1, kept byte-exact when
+  JPEG/PNG/WebP ≤ 8 MB, upright and ≤ 4096 px, else re-encoded ≤ 2560 px. Share → "Lumo clipboard" covers apps that
+  can't copy pictures; it accepts only `content://` URIs and never our own providers (confused-deputy guard). Items go to
+  other apps only via `ClipFileProvider` grants (`shareClip` → `ACTION_SEND`, with a package = straight to that app,
+  e.g. WhatsApp's chat picker; falls back to the share sheet). Drag-and-drop works inside the edge panel only (other
+  apps aren't on screen): long-press a tile → `EdgePanel`'s capture-phase `PanResponder` moves a ghost and hit-tests
+  `DropTargets` measured with `measureInWindow`; the list stays mounted under the targets so the touch isn't lost.
+  The picture editor sends fractions of the picture to `saveClipEdit` (JSON), and `ClipEditor.kt` mirrors the
+  preview's constants (`LINE_HEIGHT`, `PAD_X/Y`, `BOX_RADIUS`, stroke smoothing) — change both together.
 - **Fonts**: system families via Android names (`sans-serif-thin/-light/-medium/-black`); custom clock fonts by file
   name (`BebasNeue`, `Anton`, `Fredoka`, `Orbitron`, `BigShouldersStencil`, `Unbounded`, `Righteous`). Don't set
   `fontWeight` on custom fonts (Android may fall back to the system font).
@@ -158,8 +177,8 @@ node scripts/generate-wallpapers.mjs     # regenerate theme wallpapers in assets
   ACCESS_NETWORK_STATE, BLUETOOTH (≤ API 30), WRITE_SETTINGS (special access, asked only when the user touches
   brightness/rotation), and for the lock screen USE_FULL_SCREEN_INTENT, POST_NOTIFICATIONS (asked on Android 13+ when
   it's switched on) and SYSTEM_ALERT_WINDOW (special access, only if the user taps "Allow Display over other apps";
-  used solely as the background-start exemption — Lumo draws no overlays).
-
+  used solely as the background-start exemption — Lumo draws no overlays). The clipboard needs no permission; its
+  share entry (`ClipShareActivity`) is the only exported component besides the launcher itself.
 ## Adding things
 
 - **Setting**: add it to `Settings` + `DEFAULT_SETTINGS` in `src/theme.ts`, then a control in `SettingsSheet`.
@@ -215,6 +234,8 @@ Useful: `adb logcat | grep -i -E "ReactNativeJS|Launcher|AndroidRuntime"` for JS
 Checklist after changes: swipe up opens the drawer and dragging down from the middle closes it (grid, pages and list);
 A–Z bar jumps; swipe down opens the control panel (tiles tilt, volume/brightness pills, brightness asks for "Modify
 system settings" once); edge bar opens the panel with the 3D tilt; themes apply wallpaper + clock; "My photo" picks
-and blurs; with Lumo as default home and the lock screen on: screen off → on shows the Lumo lock, swipe up asks for the
+and blurs; copy text in an app → home → edge panel shows it under Clipboard; Share a WhatsApp picture → "Lumo clipboard"
+→ it appears; hold a clip and drop it on WhatsApp → WhatsApp's chat picker opens with it; edit a picture (draw, text,
+crop) → Save adds an edited copy; with Lumo as default home and the lock screen on: screen off → on shows the Lumo lock, swipe up asks for the
 PIN/fingerprint, fingerprint alone also dismisses it, calls are never covered, and Customize → Lock screen shows
 "✓ Opened at …" (if it says "✗ Didn't open", check the overlay permission and Lumo's notifications).

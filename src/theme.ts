@@ -57,6 +57,10 @@ export type Settings = {
   showFrequent: boolean;
   edgePanel: boolean;
   edgeHandle: EdgeHandle;
+  /** Clipboard history in the edge panel (+ Share → "Lumo clipboard"). */
+  clipboard: boolean;
+  /** Hours unpinned clipboard items are kept; 0 = until removed. */
+  clipboardKeep: number;
   lockEnabled: boolean;
   lockFace: ClockFace;
   lockColor: string;
@@ -93,6 +97,8 @@ export const DEFAULT_SETTINGS: Settings = {
   showFrequent: true,
   edgePanel: true,
   edgeHandle: 'upper',
+  clipboard: true,
+  clipboardKeep: 24,
   lockEnabled: false,
   lockFace: 'condensed',
   lockColor: 'auto',
