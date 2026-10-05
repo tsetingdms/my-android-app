@@ -92,6 +92,7 @@ function OverlayPanel() {
         onLongPressApp={noop}
         onOpenControls={openControls}
         onOpenDrawer={openDrawer}
+        overApp
       />
     </>
   );

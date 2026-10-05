@@ -36,6 +36,7 @@ import {
   type DrawerStyle,
   type EdgeHandle,
   type GlassStyle,
+  type PhoneWallpaperMode,
   type Settings,
   type SwipeDownAction,
   type ThemeMode,
@@ -292,6 +293,38 @@ export const SettingsSheet = memo(function SettingsSheet({ visible, onClose }: P
                     { value: 0.45, label: 'High' },
                   ]}
                 />
+                <Label text="Phone wallpaper" />
+                <Choice<PhoneWallpaperMode>
+                  value={settings.phoneWallpaper}
+                  onChange={(mode) => {
+                    if (mode === 'off' || settings.phoneWallpaper !== 'off') {
+                      updateSettings({ phoneWallpaper: mode });
+                      return;
+                    }
+                    Alert.alert(
+                      'Change the phone wallpaper?',
+                      "Lumo will set its wallpaper as your phone's wallpaper and keep it matched. Your current phone wallpaper can't be brought back from Lumo — you can pick another one in the phone's wallpaper settings.",
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Change', onPress: () => updateSettings({ phoneWallpaper: mode }) },
+                      ]
+                    );
+                  }}
+                  options={[
+                    { value: 'off', label: 'Separate' },
+                    { value: 'home', label: 'Match' },
+                    { value: 'both', label: 'Match + lock' },
+                  ]}
+                />
+                <Text style={[styles.hint, { color: palette.subtext }]}>
+                  {settings.wallpaper === 'system'
+                    ? 'Lumo is showing the phone’s own wallpaper already.'
+                    : settings.phoneWallpaper === 'off'
+                      ? 'When you switch apps you may see your old phone wallpaper. “Match” makes it the same picture.'
+                      : settings.phoneWallpaper === 'home'
+                        ? 'The phone’s wallpaper follows Lumo’s (app switching, Recents).'
+                        : 'The phone’s home and lock screen wallpaper follow Lumo’s.'}
+                </Text>
               </Section>
 
               <Section title="Clock" icon="time-outline">

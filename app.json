@@ -2,7 +2,7 @@
   "expo": {
     "name": "Lumo Launcher",
     "slug": "lumo-launcher",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -11,7 +11,7 @@
     },
     "android": {
       "package": "com.tsetingdms.lumolauncher",
-      "versionCode": 6,
+      "versionCode": 7,
       "adaptiveIcon": {
         "backgroundColor": "#3A238F",
         "foregroundImage": "./assets/android-icon-foreground.png",

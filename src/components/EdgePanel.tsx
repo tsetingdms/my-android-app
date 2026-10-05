@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -94,6 +95,8 @@ type PanelProps = {
   onLongPressApp: (app: App) => void;
   onOpenControls: () => void;
   onOpenDrawer: () => void;
+  /** Shown on top of another app (EdgeActivity) rather than Lumo's home screen. */
+  overApp?: boolean;
 };
 
 type Mode = 'main' | 'clips';
@@ -113,6 +116,7 @@ export const EdgePanel = memo(function EdgePanel({
   onLongPressApp,
   onOpenControls,
   onOpenDrawer,
+  overApp,
 }: PanelProps) {
   const { palette, layout, appsByKey, apps, settings } = useStore();
   const { height } = useWindowDimensions();
@@ -328,8 +332,9 @@ export const EdgePanel = memo(function EdgePanel({
     <Animated.View {...dragPan.panHandlers} pointerEvents={open ? 'auto' : 'none'} style={StyleSheet.absoluteFill}>
       <Animated.View
         renderToHardwareTextureAndroid={animating}
-        style={[StyleSheet.absoluteFill, styles.scrim, { opacity: scrimOpacity }]}
+        style={[StyleSheet.absoluteFill, !overApp && styles.scrim, { opacity: scrimOpacity }]}
       >
+        {overApp && <DepthShade />}
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
       </Animated.View>
 
@@ -457,6 +462,30 @@ export const EdgePanel = memo(function EdgePanel({
 });
 
 const clipKey = (clip: ClipItem) => clip.id;
+
+/**
+ * Over another app. Lumo can't tilt another app's window back in 3D like its own home screen (only
+ * the system can move other apps), so shading fakes the depth: darker towards the far side and the
+ * top and bottom edges, as if the app had swung back behind the panel.
+ */
+const DepthShade = memo(function DepthShade() {
+  return (
+    <>
+      <LinearGradient
+        colors={['rgba(0,0,0,0.66)', 'rgba(0,0,0,0.36)', 'rgba(0,0,0,0.5)']}
+        locations={[0, 0.62, 1]}
+        start={{ x: 0, y: 0.5 }}
+        end={{ x: 1, y: 0.5 }}
+        style={StyleSheet.absoluteFill}
+      />
+      <LinearGradient
+        colors={['rgba(0,0,0,0.4)', 'rgba(0,0,0,0)', 'rgba(0,0,0,0)', 'rgba(0,0,0,0.4)']}
+        locations={[0, 0.16, 0.84, 1]}
+        style={StyleSheet.absoluteFill}
+      />
+    </>
+  );
+});
 const styles = StyleSheet.create({
   handleArea: {
     position: 'absolute',

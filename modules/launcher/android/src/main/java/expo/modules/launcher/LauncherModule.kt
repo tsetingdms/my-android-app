@@ -327,6 +327,11 @@ class LauncherModule : Module() {
       deviceStats()
     }
 
+    // Optional: the phone's own wallpaper follows Lumo's (decoded, blurred and set off the main thread).
+    AsyncFunction("setPhoneWallpaper") { spec: String ->
+      PhoneWallpaper.apply(context, spec)
+    }
+
     Function("getWallpaperColor") {
       wallpaperColor()
     }

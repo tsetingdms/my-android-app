@@ -3,7 +3,7 @@
 Android home-screen launcher for budget phones (target device: **Moto E40**, Android 11, 720×1600, Unisoc T700, 4 GB RAM).
 Expo SDK 57 (React Native 0.86, New Architecture, Hermes) + TypeScript, plus a local Kotlin Expo module.
 Everything is stored on the phone (AsyncStorage); there is no backend, no account and no network use.
-App version lives in `app.json` (`expo.version` 1.3.0, `android.versionCode` 6).
+App version lives in `app.json` (`expo.version` 1.4.0, `android.versionCode` 7).
 
 ## Repo & branches
 
@@ -61,6 +61,8 @@ node scripts/generate-wallpapers.mjs     # regenerate theme wallpapers in assets
   (one-tap presets = settings patches), `CLOCK_FACES`, `CLOCK_COLORS`, icon shapes, `makePalette()` (glass colors per
   style: liquid / frosted / clear / solid), drawer categories.
 - `src/hooks.ts` — minute clock, polled battery / device stats, date/time formatting.
+- `src/wallpaperSync.ts` — `phoneWallpaperSpec()`: what `PhoneWallpaper.kt` draws so the phone's own wallpaper matches
+  Lumo's (theme picture = its drawable resource name via `Image.resolveAssetSource`, photo = file URI, or gradient).
 - `src/clipboard.ts` — `useClips(enabled)` (edge-panel clipboard list from native, pinned first, re-renders only on
   change), `timeAgo`, `contrastOn`.
 - `src/components/`
@@ -96,6 +98,9 @@ node scripts/generate-wallpapers.mjs     # regenerate theme wallpapers in assets
   - `ClipboardStore.kt` — edge-panel clipboard: capture, `filesDir/clipboard` (+ `index.json`), dedupe, expiry, copy,
     share intents; `ClipFileProvider` (authority `<package>.clipfiles`). `ClipEditor.kt` renders picture edits.
     `ClipShareActivity.kt` — Share → "Lumo clipboard" (invisible, disabled while the setting is off).
+  - `PhoneWallpaper.kt` — optional phone-wallpaper sync: decodes the picture (only bundled drawables or files inside
+    `filesDir`) or draws the gradient + orbs at screen size, applies the same blur (shrink/upscale) and dim, then
+    `WallpaperManager.setBitmap` (home, or home + lock); skips a spec it already applied (prefs `lumo_wallpaper`).
   - `EdgeOverlay.kt` — the floating edge bar over other apps (`TYPE_APPLICATION_OVERLAY` window, needs "Display over
     other apps"; shown/hidden from `ActivityLifecycleCallbacks`: hidden while the home screen, `EdgeActivity` or the
     lock screen is resumed) and `EdgeActivity` (see-through `ReactActivity` hosting `edge`; finishes in `onStop`).
@@ -185,10 +190,16 @@ node scripts/generate-wallpapers.mjs     # regenerate theme wallpapers in assets
 - **Edge panel over other apps** (setting `edgeOverlay`, default off; only with `edgePanel`): the home screen keeps its
   own JS edge bar; elsewhere `EdgeOverlay` draws a native bar (same look; `position` and `dark` synced by the
   publishing store). Tap/swipe left → `EdgeActivity` started from the overlay window (allowed: SAW granted + our window
-  visible). Other apps can't be tilted in 3D (only the system can transform another app's window), so they're dimmed.
+  visible). Other apps can't be tilted in 3D (only the system can transform another app's window; faking it would need
+  screen capture — MediaProjection or an accessibility service — which we don't want), so `EdgePanel overApp` shades
+  them with `DepthShade` (darker far side + top/bottom vignette) instead of the plain scrim.
   The panel can't drop into the app behind (our activity covers it); drop on an app icon sends via `ACTION_SEND`.
   Opening it gives Lumo focus, so the clipboard captures what was just copied in that app. No foreground service: if
   Android kills Lumo while you're in another app, the bar returns once the home screen runs again.
+- **Phone wallpaper** (setting `phoneWallpaper`: `off` "Separate" (default) / `home` "Match" / `both` "Match + lock"):
+  the publishing store sends `phoneWallpaperSpec()` 800 ms after Lumo's wallpaper/blur/dim/theme changes, so app
+  switching, Recents and the lock screen show the same picture. Lumo can't read or restore the previous phone
+  wallpaper (Customize asks before the first overwrite). "Phone" (`wallpaper: 'system'`) never syncs.
 - **Fonts**: system families via Android names (`sans-serif-thin/-light/-medium/-black`); custom clock fonts by file
   name (`BebasNeue`, `Anton`, `Fredoka`, `Orbitron`, `BigShouldersStencil`, `Unbounded`, `Righteous`). Don't set
   `fontWeight` on custom fonts (Android may fall back to the system font).
@@ -201,7 +212,7 @@ node scripts/generate-wallpapers.mjs     # regenerate theme wallpapers in assets
   network features without revisiting this (debug builds keep INTERNET for Metro). `blockedPermissions` removes the
   storage permissions. Permissions the module adds: EXPAND_STATUS_BAR, REQUEST_DELETE_PACKAGES, ACCESS_WIFI_STATE,
   ACCESS_NETWORK_STATE, BLUETOOTH (≤ API 30), WRITE_SETTINGS (special access, asked only when the user touches
-  brightness/rotation), and for the lock screen USE_FULL_SCREEN_INTENT, POST_NOTIFICATIONS (asked on Android 13+ when
+  brightness/rotation), SET_WALLPAPER (normal, only used by the opt-in phone-wallpaper sync), and for the lock screen USE_FULL_SCREEN_INTENT, POST_NOTIFICATIONS (asked on Android 13+ when
   it's switched on) and SYSTEM_ALERT_WINDOW (special access, only if the user taps "Allow Display over other apps";
   used as the background-start exemption and, if the user turns on "Show over other apps", for the floating edge bar —
   Lumo draws nothing else over apps and reads nothing on screen). The clipboard needs no permission; its
@@ -264,7 +275,8 @@ A–Z bar jumps; swipe down opens the control panel (tiles tilt, volume/brightne
 system settings" once); edge bar opens the panel with the 3D tilt; themes apply wallpaper + clock; "My photo" picks
 and blurs; copy text in an app → home → edge panel shows it under Clipboard; Share a WhatsApp picture → "Lumo clipboard"
 → it appears; hold a clip and drop it on WhatsApp → WhatsApp's chat picker opens with it; edit a picture (draw, text,
-crop) → Save adds an edited copy; with "Show over other apps" on: the bar floats over WhatsApp (not on the home
+crop) → Save adds an edited copy; Customize → Wallpaper → Phone wallpaper "Match" → after picking a theme, Recents
+shows the same picture; with "Show over other apps" on: the bar floats over WhatsApp (not on the home
 screen), tap it → the panel opens over WhatsApp with the app dimmed, launching/sending closes it, Back closes it, More
 opens the home drawer; with Lumo as default home and the lock screen on: screen off → on shows the Lumo lock, swipe up asks for the
 PIN/fingerprint, fingerprint alone also dismisses it, calls are never covered, and Customize → Lock screen shows

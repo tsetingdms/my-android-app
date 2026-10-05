@@ -14,6 +14,7 @@ import { AppState, PixelRatio, useColorScheme } from 'react-native';
 import * as Launcher from '../modules/launcher';
 import type { NativeApp } from '../modules/launcher';
 import { DEFAULT_SETTINGS, makePalette, mix, type Palette, type Settings } from './theme';
+import { phoneWallpaperSpec } from './wallpaperSync';
 
 export type App = NativeApp;
 
@@ -330,6 +331,24 @@ export function StoreProvider({ children, publish = false }: { children: ReactNo
   useEffect(() => {
     if (ready && publish) Launcher.setEdgeOverlay(overlayOn, settings.edgeHandle, palette.dark);
   }, [ready, publish, overlayOn, settings.edgeHandle, palette.dark]);
+
+  // Optional: the phone's own wallpaper follows Lumo's, so app switching and the lock screen match.
+  // Debounced (tapping through wallpapers), and the native side skips a spec it already applied.
+  const phoneSpec = useMemo(
+    () => (ready && publish ? phoneWallpaperSpec(settings, dark) : null),
+    [ready, publish, settings, dark]
+  );
+  const phoneSpecJson = phoneSpec ? JSON.stringify(phoneSpec) : null;
+  useEffect(() => {
+    if (!phoneSpecJson) return;
+    const t = setTimeout(() => {
+      Launcher.setPhoneWallpaper(phoneSpecJson).then((ok) => {
+        // "Accent: wallpaper" follows the new picture.
+        if (ok) setWallpaperColor(Launcher.getWallpaperColor());
+      });
+    }, 800);
+    return () => clearTimeout(t);
+  }, [phoneSpecJson]);
 
   useEffect(() => {
     if (publish && ready) publishShared({ value, look, actions });

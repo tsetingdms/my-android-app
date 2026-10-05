@@ -20,6 +20,8 @@ export type ClockStyle = ClockFace;
 export type DrawerStyle = 'grid' | 'pages' | 'list';
 export type SwipeDownAction = 'controls' | 'split' | 'notifications';
 export type EdgeHandle = 'upper' | 'middle' | 'lower';
+/** Whether the phone's own wallpaper follows Lumo's: not at all, home screen only, or home + lock screen. */
+export type PhoneWallpaperMode = 'off' | 'home' | 'both';
 
 export type Settings = {
   theme: ThemeMode;
@@ -35,6 +37,8 @@ export type Settings = {
   /** Frosted (blurred-wallpaper) backgrounds behind the drawer and panels. */
   panelBlur: boolean;
   dim: number;
+  /** Also set Lumo's wallpaper as the phone's own wallpaper (app switching, lock screen). */
+  phoneWallpaper: PhoneWallpaperMode;
   iconShape: IconShape;
   iconSize: number;
   columns: number;
@@ -79,6 +83,7 @@ export const DEFAULT_SETTINGS: Settings = {
   wallpaperBlur: 0,
   panelBlur: true,
   dim: 0.15,
+  phoneWallpaper: 'off',
   iconShape: 'squircle',
   iconSize: 56,
   columns: 4,
