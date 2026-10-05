@@ -85,6 +85,7 @@ type LauncherEvents = {
   onHomePressed(): void;
   onTorchChanged(event: { on: boolean }): void;
   onClipsChanged(): void;
+  onOpenRequest(event: { target: string }): void;
 };
 
 declare class LauncherNativeModule extends NativeModule<LauncherEvents> {
@@ -132,6 +133,10 @@ declare class LauncherNativeModule extends NativeModule<LauncherEvents> {
   deleteClip(id: string): boolean;
   clearClips(): boolean;
   saveClipEdit(id: string, edit: string): Promise<string | null>;
+  setEdgeOverlay(enabled: boolean, position: string, dark: boolean): Promise<void>;
+  closeEdgeOverlay(): boolean;
+  canDrawOverlays(): boolean;
+  openHome(target: string): boolean;
 }
 
 // Optional so the JS still loads (with empty data) outside a native Android build.
@@ -234,6 +239,23 @@ export function saveClipEdit(id: string, edit: string): Promise<string | null> {
 }
 export function addClipsListener(listener: () => void) {
   const sub = native?.addListener('onClipsChanged', listener);
+  return () => sub?.remove();
+}
+
+// Edge panel over other apps
+
+/** Shows or hides the floating edge bar over other apps (it also needs "Display over other apps"). */
+export function setEdgeOverlay(enabled: boolean, position: string, dark: boolean) {
+  native?.setEdgeOverlay(enabled, position, dark).catch(() => {});
+}
+/** Finishes the see-through panel screen (after its closing animation). */
+export const closeEdgeOverlay = () => native?.closeEdgeOverlay() ?? false;
+/** "Display over other apps" granted. */
+export const canDrawOverlays = () => native?.canDrawOverlays() ?? false;
+/** Goes back to the home screen and asks it to open something there. */
+export const openHome = (target: 'drawer') => native?.openHome(target) ?? false;
+export function addOpenRequestListener(listener: (target: string) => void) {
+  const sub = native?.addListener('onOpenRequest', (e) => listener(e.target));
   return () => sub?.remove();
 }
 

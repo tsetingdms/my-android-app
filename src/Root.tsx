@@ -279,6 +279,15 @@ export function Root() {
     [closeAll, goToPage]
   );
 
+  // "More" in the edge panel over another app comes back here with the drawer open.
+  useEffect(
+    () =>
+      Launcher.addOpenRequestListener((what) => {
+        if (what === 'drawer') openDrawer(false);
+      }),
+    [openDrawer]
+  );
+
   const onLaunchHome = useCallback((app: App) => launch(app), [launch]);
   const onLaunchDrawer = useCallback(
     (app: App) => {

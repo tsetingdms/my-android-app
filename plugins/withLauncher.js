@@ -45,6 +45,25 @@ function withHomeIntent(config) {
           'keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize',
       },
     });
+
+    // Edge panel over other apps (expo.modules.launcher.EdgeActivity): a see-through screen on top
+    // of the current app, opened from the floating edge bar. Not exported; finishes when hidden.
+    const edgeName = 'expo.modules.launcher.EdgeActivity';
+    app.activity = app.activity.filter((a) => a.$['android:name'] !== edgeName);
+    app.activity.push({
+      $: {
+        'android:name': edgeName,
+        'android:theme': '@style/Theme.Lumo.Overlay',
+        'android:exported': 'false',
+        'android:launchMode': 'singleInstance',
+        'android:taskAffinity': `${cfg.android?.package ?? 'lumo'}.edge`,
+        'android:excludeFromRecents': 'true',
+        'android:noHistory': 'true',
+        'android:windowSoftInputMode': 'adjustResize',
+        'android:configChanges':
+          'keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize',
+      },
+    });
     return cfg;
   });
 }
@@ -69,6 +88,20 @@ function withWallpaperTheme(config) {
       setStyleItem(style, 'android:statusBarColor', '@android:color/transparent');
       setStyleItem(style, 'android:navigationBarColor', '@android:color/transparent');
     }
+
+    // The edge panel over other apps must show the app behind it, not the wallpaper.
+    let overlay = styles.find((s) => s.$.name === 'Theme.Lumo.Overlay');
+    if (!overlay) {
+      overlay = { $: { name: 'Theme.Lumo.Overlay', parent: 'AppTheme' }, item: [] };
+      styles.push(overlay);
+    }
+    setStyleItem(overlay, 'android:windowIsTranslucent', 'true');
+    setStyleItem(overlay, 'android:windowShowWallpaper', 'false');
+    setStyleItem(overlay, 'android:windowBackground', '@android:color/transparent');
+    setStyleItem(overlay, 'android:windowNoTitle', 'true');
+    setStyleItem(overlay, 'android:windowAnimationStyle', '@null');
+    setStyleItem(overlay, 'android:backgroundDimEnabled', 'false');
+    cfg.modResults.resources.style = styles;
     return cfg;
   });
 }

@@ -52,6 +52,7 @@ export const SettingsSheet = memo(function SettingsSheet({ visible, onClose }: P
   const { width } = useWindowDimensions();
   const now = useMinuteClock();
   const [isDefault, setIsDefault] = useState(true);
+  const [canOverlay, setCanOverlay] = useState(true);
   const [clockTarget, setClockTarget] = useState<'home' | 'lock'>('home');
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [lockStatus, setLockStatus] = useState<Launcher.LockScreenStatus | null>(null);
@@ -84,8 +85,11 @@ export const SettingsSheet = memo(function SettingsSheet({ visible, onClose }: P
   useEffect(() => {
     if (!visible) return;
     setIsDefault(Launcher.isDefaultLauncher());
+    setCanOverlay(Launcher.canDrawOverlays());
     const sub = AppState.addEventListener('change', (s) => {
-      if (s === 'active') setIsDefault(Launcher.isDefaultLauncher());
+      if (s !== 'active') return;
+      setIsDefault(Launcher.isDefaultLauncher());
+      setCanOverlay(Launcher.canDrawOverlays());
     });
     return () => sub.remove();
   }, [visible]);
@@ -407,8 +411,25 @@ export const SettingsSheet = memo(function SettingsSheet({ visible, onClose }: P
                       ]}
                     />
                     <Toggle
+                      label="Show over other apps"
+                      hint="The edge bar also floats over WhatsApp, Instagram and every other app. Needs “Display over other apps” (Lumo only draws the bar)."
+                      value={settings.edgeOverlay}
+                      onChange={(on) => {
+                        updateSettings({ edgeOverlay: on });
+                        if (on && !Launcher.canDrawOverlays()) Launcher.openOverlaySettings();
+                      }}
+                    />
+                    {settings.edgeOverlay && !canOverlay && (
+                      <Row
+                        label="Allow “Display over other apps”"
+                        detail="Needed"
+                        onPress={() => Launcher.openOverlaySettings()}
+                        chevron
+                      />
+                    )}
+                    <Toggle
                       label="Clipboard in edge panel"
-                      hint="Keeps text and pictures you copy (saved when you come back to the home screen) and adds “Lumo clipboard” to the Share menu. Stays on this phone."
+                      hint="Keeps text and pictures you copy (saved when you come back to the home screen or open the edge panel) and adds “Lumo clipboard” to the Share menu. Passwords and codes aren't kept. Turning it off deletes saved items except pinned ones. Stays on this phone."
                       value={settings.clipboard}
                       onChange={set('clipboard')}
                     />

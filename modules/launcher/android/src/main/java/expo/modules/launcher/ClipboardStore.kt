@@ -111,7 +111,12 @@ internal object ClipboardStore {
       // Not fatal: the share entry just stays as it was.
     }
     io.execute {
-      if (prune(c)) notifyChanged()
+      // Turning the clipboard off deletes what it saved; pinned items stay.
+      if (!enabled) {
+        clear(c)
+      } else if (prune(c)) {
+        notifyChanged()
+      }
       cleanup(c)
     }
   }
@@ -161,8 +166,35 @@ internal object ClipboardStore {
       }
     }
     val text = item.text?.toString() ?: item.htmlText?.let { htmlToText(it) }
-    if (!text.isNullOrBlank()) io.execute { addText(c, text) }
+    if (!text.isNullOrBlank() && !looksSecret(text)) io.execute { addText(c, text) }
   }
+
+  /**
+   * Copied passwords, PINs and one-time codes are never saved (most password apps only mark their
+   * copies as sensitive on Android 13+). Secret-looking means: a 4–8 digit code (spaces or a dash
+   * allowed), or 8–64 characters without spaces mixing at least three of lower case, upper case,
+   * digits and symbols — except links, e-mail addresses, @handles and #tags. Sharing something to
+   * "Lumo clipboard" on purpose still saves it.
+   */
+  fun looksSecret(raw: String): Boolean {
+    val text = raw.trim()
+    if (text.length <= 10) {
+      val compact = text.filter { it != ' ' && it != '-' }
+      if (compact.length in 4..8 && compact.all { it in '0'..'9' }) return true
+    }
+    if (text.length !in 8..64 || text.any { it.isWhitespace() }) return false
+    if (text.contains("://") || text.startsWith("www.", ignoreCase = true)) return false
+    if (text.startsWith("@") || text.startsWith("#")) return false
+    if (EMAIL.matches(text)) return false
+    var kinds = 0
+    if (text.any { it.isLowerCase() }) kinds++
+    if (text.any { it.isUpperCase() }) kinds++
+    if (text.any { it.isDigit() }) kinds++
+    if (text.any { !it.isLetterOrDigit() }) kinds++
+    return kinds >= 3
+  }
+
+  private val EMAIL = Regex("^[^@\\s]+@[^@\\s]+\\.[A-Za-z]{2,}$")
 
   private fun htmlToText(html: String): String {
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -197,13 +229,15 @@ internal object ClipboardStore {
     val c = context.applicationContext
     // Only content URIs (with a grant from the sending app); never file paths.
     if (uri.scheme != "content") return false
-    val authority = uri.authority ?: return false
+    // "10@authority" addresses the same provider (for that Android user), so judge the bare authority.
+    val authority = uri.authority?.substringAfterLast('@') ?: return false
     if (authority == authority(c)) {
       // One of our own items coming back (after "Copy").
       val name = uri.lastPathSegment ?: return false
       return touchFile(c, name)
     }
     // Never read our own providers on someone else's behalf: they could point at private files.
+    if (authority == c.packageName || authority.startsWith("${c.packageName}.")) return false
     val owner = try {
       c.packageManager.resolveContentProvider(authority, 0)?.packageName
     } catch (e: Exception) {
@@ -578,7 +612,7 @@ internal object ClipboardStore {
     BitmapFactory.decodeFile(file.path, bounds)
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
     var sample = 1
-    while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxSide) sample *= 2
+    while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxSide * 3 / 4) sample *= 2
     var bitmap = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
     val rotation = exifRotation(file)
     val longSide = max(bitmap.width, bitmap.height)

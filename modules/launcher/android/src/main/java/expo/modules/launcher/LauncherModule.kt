@@ -57,7 +57,7 @@ class LauncherModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("Launcher")
 
-    Events("onAppsChanged", "onHomePressed", "onTorchChanged", "onClipsChanged")
+    Events("onAppsChanged", "onHomePressed", "onTorchChanged", "onClipsChanged", "onOpenRequest")
 
     OnCreate {
       registerPackageReceiver()
@@ -66,6 +66,7 @@ class LauncherModule : Module() {
         SystemControls.watchTorch(ctx) { on -> sendEvent("onTorchChanged", Bundle().apply { putBoolean("on", on) }) }
       }
       ClipboardStore.onChange = { sendEvent("onClipsChanged", Bundle()) }
+      appContext.reactContext?.let { EdgeOverlay.init(it) }
     }
 
     OnActivityEntersForeground {
@@ -87,6 +88,10 @@ class LauncherModule : Module() {
     OnNewIntent { intent ->
       if (intent.hasCategory(Intent.CATEGORY_HOME)) {
         sendEvent("onHomePressed", Bundle())
+      }
+      // The edge panel over another app asked the home screen to show something (e.g. the drawer).
+      intent.getStringExtra(EXTRA_OPEN)?.let { target ->
+        sendEvent("onOpenRequest", Bundle().apply { putString("target", target) })
       }
     }
 
@@ -254,6 +259,26 @@ class LauncherModule : Module() {
 
     // endregion
 
+    // region Edge panel over other apps
+
+    AsyncFunction("setEdgeOverlay") { enabled: Boolean, position: String, dark: Boolean ->
+      EdgeOverlay.configure(context, enabled, position, dark)
+    }.runOnQueue(Queues.MAIN)
+
+    Function("closeEdgeOverlay") {
+      EdgeActivity.close()
+    }
+
+    Function("canDrawOverlays") {
+      Settings.canDrawOverlays(context)
+    }
+
+    Function("openHome") { target: String ->
+      openHome(target)
+    }
+
+    // endregion
+
     // region Lock screen
 
     Function("setLockScreenEnabled") { enabled: Boolean ->
@@ -361,6 +386,14 @@ class LauncherModule : Module() {
     } catch (e: Exception) {
       // Never let a clipboard problem crash the home screen.
     }
+  }
+
+  /** Brings the home screen to the front and asks it to open [target] (e.g. "drawer"). */
+  private fun openHome(target: String): Boolean {
+    val intent = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: return false
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+    intent.putExtra(EXTRA_OPEN, target)
+    return start(intent)
   }
 
   /** Sends an item straight to [packageName] (e.g. WhatsApp's chat picker), or through the share sheet. */
@@ -679,5 +712,6 @@ class LauncherModule : Module() {
     private const val HOME_ROLE_REQUEST = 4242
     private const val PHOTO_REQUEST = 4243
     private const val NOTIFICATION_REQUEST = 4244
+    private const val EXTRA_OPEN = "lumo_open"
   }
 }

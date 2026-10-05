@@ -9,7 +9,7 @@ export default function App() {
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider style={styles.root}>
-        <StoreProvider>
+        <StoreProvider publish>
           <Root />
         </StoreProvider>
       </SafeAreaProvider>

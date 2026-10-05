@@ -57,6 +57,8 @@ export type Settings = {
   showFrequent: boolean;
   edgePanel: boolean;
   edgeHandle: EdgeHandle;
+  /** Edge bar over other apps too (needs "Display over other apps"). */
+  edgeOverlay: boolean;
   /** Clipboard history in the edge panel (+ Share → "Lumo clipboard"). */
   clipboard: boolean;
   /** Hours unpinned clipboard items are kept; 0 = until removed. */
@@ -97,6 +99,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showFrequent: true,
   edgePanel: true,
   edgeHandle: 'upper',
+  edgeOverlay: false,
   clipboard: true,
   clipboardKeep: 24,
   lockEnabled: false,

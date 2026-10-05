@@ -65,6 +65,16 @@ const StoreContext = createContext<StoreValue | null>(null);
 const LookContext = createContext<LookValue | null>(null);
 const ActionsContext = createContext<ActionsValue | null>(null);
 
+// Other React roots in the same JS runtime (the edge panel over other apps) use the launcher's live
+// store instead of loading and saving a second copy, which would overwrite each other's changes.
+type Shared = { value: StoreValue; look: LookValue; actions: ActionsValue };
+let shared: Shared | null = null;
+const sharedListeners = new Set<() => void>();
+function publishShared(next: Shared | null) {
+  shared = next;
+  sharedListeners.forEach((listener) => listener());
+}
+
 /** Everything. Re-renders on any change (apps, layout, launch counts…) — use only where needed. */
 export function useStore(): StoreValue {
   const value = useContext(StoreContext);
@@ -138,7 +148,11 @@ function seedLayout(layout: Layout, apps: App[], columns: number): Layout {
   return { ...layout, dock, home, seeded: true };
 }
 
-export function StoreProvider({ children }: { children: ReactNode }) {
+/**
+ * The launcher's store. `publish` (the home screen's provider only) shares it with the other roots;
+ * a provider without it is a standalone copy, used only when the home screen isn't running.
+ */
+export function StoreProvider({ children, publish = false }: { children: ReactNode; publish?: boolean }) {
   const scheme = useColorScheme();
   const [ready, setReady] = useState(false);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
@@ -311,10 +325,48 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [updateSettings, resetSettings, updateLayout, refreshApps, launch]
   );
 
+  // Floating edge bar over other apps (drawn natively; it hides itself on the home screen).
+  const overlayOn = settings.edgePanel && settings.edgeOverlay;
+  useEffect(() => {
+    if (ready && publish) Launcher.setEdgeOverlay(overlayOn, settings.edgeHandle, palette.dark);
+  }, [ready, publish, overlayOn, settings.edgeHandle, palette.dark]);
+
+  useEffect(() => {
+    if (publish && ready) publishShared({ value, look, actions });
+  }, [publish, ready, value, look, actions]);
+  useEffect(() => {
+    if (!publish) return;
+    return () => publishShared(null);
+  }, [publish]);
+
   return (
     <ActionsContext.Provider value={actions}>
       <LookContext.Provider value={look}>
         <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
+      </LookContext.Provider>
+    </ActionsContext.Provider>
+  );
+}
+
+/**
+ * For other React roots (the edge panel over other apps): the home screen's live store, or a
+ * standalone one if the home screen isn't running right now.
+ */
+export function SharedStoreProvider({ children }: { children: ReactNode }) {
+  const [current, setCurrent] = useState<Shared | null>(shared);
+  useEffect(() => {
+    const listener = () => setCurrent(shared);
+    sharedListeners.add(listener);
+    listener();
+    return () => {
+      sharedListeners.delete(listener);
+    };
+  }, []);
+  if (!current) return <StoreProvider>{children}</StoreProvider>;
+  return (
+    <ActionsContext.Provider value={current.actions}>
+      <LookContext.Provider value={current.look}>
+        <StoreContext.Provider value={current.value}>{children}</StoreContext.Provider>
       </LookContext.Provider>
     </ActionsContext.Provider>
   );

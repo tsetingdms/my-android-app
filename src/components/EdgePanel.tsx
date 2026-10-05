@@ -528,7 +528,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     marginTop: 12,
   },
-  panelGlass: {    flex: 1,
+  panelGlass: {
+    flex: 1,
     paddingHorizontal: 8,
     paddingTop: 10,
     paddingBottom: 8,
