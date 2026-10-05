@@ -2,6 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
+  Alert,
   AppState,
   FlatList,
   Image,
@@ -425,7 +426,16 @@ export const SettingsSheet = memo(function SettingsSheet({ visible, onClose }: P
                           ]}
                         />
                         <Text style={[styles.hint, { color: palette.subtext }]}>Pinned items are always kept.</Text>
-                        <Row label="Clear clipboard" onPress={() => Launcher.clearClips()} destructive />
+                        <Row
+                          label="Clear clipboard"
+                          onPress={() =>
+                            Alert.alert('Clear the clipboard?', 'Pinned items stay.', [
+                              { text: 'Cancel', style: 'cancel' },
+                              { text: 'Clear', style: 'destructive', onPress: () => Launcher.clearClips() },
+                            ])
+                          }
+                          destructive
+                        />
                       </>
                     )}
                   </>
