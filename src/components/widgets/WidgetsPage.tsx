@@ -13,15 +13,17 @@ import { batteryIcon } from './GlanceRow';
 
 type Props = {
   width: number;
+  /** This page is the one on screen: its clock and phone readings only update then. */
+  active: boolean;
   bottomInset: number;
   onOpenSettings: () => void;
 };
 
 /** Second home page: a scrollable stack of widgets. */
-export const WidgetsPage = memo(function WidgetsPage({ width, bottomInset, onOpenSettings }: Props) {
+export const WidgetsPage = memo(function WidgetsPage({ width, active, bottomInset, onOpenSettings }: Props) {
   const { palette } = useLook();
   const insets = useSafeAreaInsets();
-  const now = useMinuteClock();
+  const now = useMinuteClock(active);
   const shadow = palette.dark ? styles.shadow : null;
 
   return (
@@ -35,8 +37,8 @@ export const WidgetsPage = memo(function WidgetsPage({ width, bottomInset, onOpe
       <Text style={[styles.subtitle, { color: palette.onWallpaper }, shadow]}>Your widgets</Text>
 
       <QuickTiles />
-      <DeviceCard />
-      <CalendarCard />
+      <DeviceCard active={active} />
+      <CalendarCard active={active} />
       <NoteCard />
 
       <GlassButton radius={20} style={styles.customize} onPress={onOpenSettings}>
@@ -109,10 +111,10 @@ function Meter({ label, value, detail, color }: { label: string; value: number; 
   );
 }
 
-function DeviceCard() {
+function DeviceCard({ active }: { active: boolean }) {
   const { palette } = useLook();
-  const battery = useBattery();
-  const stats = useDeviceStats();
+  const battery = useBattery(active);
+  const stats = useDeviceStats(active);
   const ramUsed = stats ? stats.ramTotal - stats.ramAvailable : 0;
   const diskUsed = stats ? stats.storageTotal - stats.storageAvailable : 0;
 
@@ -154,9 +156,9 @@ function DeviceCard() {
   );
 }
 
-function CalendarCard() {
+function CalendarCard({ active }: { active: boolean }) {
   const { palette } = useLook();
-  const now = useMinuteClock();
+  const now = useMinuteClock(active);
   const year = now.getFullYear();
   const month = now.getMonth();
   const today = now.getDate();

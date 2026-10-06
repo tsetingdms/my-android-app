@@ -374,7 +374,7 @@ export function Root() {
               <View style={styles.root} />
               <HomeGrid look={look} onPress={onLaunchHome} onLongPress={onLongHome} />
             </Pressable>
-            <WidgetsPage width={width} bottomInset={0} onOpenSettings={openSettings} />
+            <WidgetsPage width={width} active={page === 1} bottomInset={0} onOpenSettings={openSettings} />
           </ScrollView>
 
           <View style={{ paddingBottom: insets.bottom + 10, paddingTop: 6 }}>

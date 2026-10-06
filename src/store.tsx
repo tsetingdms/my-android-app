@@ -13,7 +13,7 @@ import { AppState, PixelRatio, useColorScheme } from 'react-native';
 
 import * as Launcher from '../modules/launcher';
 import type { NativeApp } from '../modules/launcher';
-import { DEFAULT_SETTINGS, makePalette, mix, type Palette, type Settings } from './theme';
+import { DEFAULT_SETTINGS, GRADIENTS, makePalette, mix, wallpaperImage, type Palette, type Settings } from './theme';
 import { phoneWallpaperSpec } from './wallpaperSync';
 
 export type App = NativeApp;
@@ -229,7 +229,8 @@ export function StoreProvider({ children, publish = false }: { children: ReactNo
       setTimeout(refreshApps, 400);
     });
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active' && Date.now() - lastRefresh.current > 5 * 60_000) refreshApps();
+      // Install/remove events already keep the list current; this only catches anything missed.
+      if (state === 'active' && Date.now() - lastRefresh.current > 30 * 60_000) refreshApps();
     });
     return () => {
       offApps();
@@ -331,6 +332,13 @@ export function StoreProvider({ children, publish = false }: { children: ReactNo
   useEffect(() => {
     if (ready && publish) Launcher.setEdgeOverlay(overlayOn, settings.edgeHandle, palette.dark);
   }, [ready, publish, overlayOn, settings.edgeHandle, palette.dark]);
+
+  // Lumo's own picture or gradient covers the whole screen, so the phone's wallpaper behind it
+  // doesn't need drawing (saves GPU work, and a live wallpaper stops animating).
+  const coversWallpaper = wallpaperImage(settings) != null || GRADIENTS[settings.wallpaper] != null;
+  useEffect(() => {
+    if (ready && publish) Launcher.setShowSystemWallpaper(!coversWallpaper);
+  }, [ready, publish, coversWallpaper]);
 
   // Optional: the phone's own wallpaper follows Lumo's, so app switching and the lock screen match.
   // Debounced (tapping through wallpapers), and the native side skips a spec it already applied.

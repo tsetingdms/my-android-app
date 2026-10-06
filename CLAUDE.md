@@ -3,7 +3,7 @@
 Android home-screen launcher for budget phones (target device: **Moto E40**, Android 11, 720×1600, Unisoc T700, 4 GB RAM).
 Expo SDK 57 (React Native 0.86, New Architecture, Hermes) + TypeScript, plus a local Kotlin Expo module.
 Everything is stored on the phone (AsyncStorage); there is no backend, no account and no network use.
-App version lives in `app.json` (`expo.version` 1.4.0, `android.versionCode` 7).
+App version lives in `app.json` (`expo.version` 1.4.1, `android.versionCode` 8).
 
 ## Repo & branches
 
@@ -60,7 +60,8 @@ node scripts/generate-wallpapers.mjs     # regenerate theme wallpapers in assets
   `wallpaper: 'img:<id>'`; `'photo'` uses `photoUri`; `'system'` = phone wallpaper), `wallpaperImage()`, `THEMES`
   (one-tap presets = settings patches), `CLOCK_FACES`, `CLOCK_COLORS`, icon shapes, `makePalette()` (glass colors per
   style: liquid / frosted / clear / solid), drawer categories.
-- `src/hooks.ts` — minute clock, polled battery / device stats, date/time formatting.
+- `src/hooks.ts` — one shared minute clock (`useMinuteClock(active)`) and shared polls (`useBattery(active)`,
+  `useDeviceStats(active)`): a single timer each, running only while some visible component subscribes; date/time formatting.
 - `src/wallpaperSync.ts` — `phoneWallpaperSpec()`: what `PhoneWallpaper.kt` draws so the phone's own wallpaper matches
   Lumo's (theme picture = its drawable resource name via `Image.resolveAssetSource`, photo = file URI, or gradient).
 - `src/clipboard.ts` — `useClips(enabled)` (edge-panel clipboard list from native, pinned first, re-renders only on
@@ -143,7 +144,12 @@ node scripts/generate-wallpapers.mjs     # regenerate theme wallpapers in assets
   drawer list mounts ~1.2 s after start and the control/edge panels ~1.5 s after (`overlaysReady`); the app list only
   re-renders when its JSON changes; animations use `useNativeDriver: true` and interpolations are memoized; the control
   panel polls system state every 2 s only while open (first read ~380 ms after opening, re-render only on change);
-  launch counts update after the app-open transition; `usePolled` skips unchanged readings.
+  launch counts update after the app-open transition; shared polls skip unchanged readings.
+  **Battery**: anything always mounted but hidden (control panel, Customize, widgets page) passes `active=false` to
+  `useMinuteClock` / `useBattery` / `useDeviceStats`, so it doesn't tick or poll; no endless animations (the lock
+  screen's nudge runs 3 times); while Lumo draws its own picture/gradient, `setShowSystemWallpaper(false)` clears
+  `FLAG_SHOW_WALLPAPER` on the home window so the hidden phone wallpaper (or a live wallpaper) isn't drawn; the app
+  list is rescanned on return only after 30 min (package broadcasts cover installs). JS timers pause in the background.
   While an overlay opens/closes/is dragged, `Root` sets `renderToHardwareTextureAndroid` on the home view
   (`homeLayer`, stays on while an overlay is open) and on the moving panel (`panelAnimating` → `animating` prop, off
   once settled) so the GPU only moves textures; panel/handle drags report `onDragStart`. Root's children are

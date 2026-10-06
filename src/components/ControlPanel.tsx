@@ -33,8 +33,9 @@ export const ControlPanel = memo(function ControlPanel({ progress, open, animati
   const { palette, settings } = useLook();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const now = useMinuteClock();
-  const battery = useBattery();
+  // Clock and battery only tick while the panel is open (it stays mounted, hidden, the rest of the time).
+  const now = useMinuteClock(open);
+  const battery = useBattery(open);
   const [state, setState] = useState<SystemState>(() => Launcher.getSystemState());
   const [needsAccess, setNeedsAccess] = useState<null | 'brightness' | 'rotation'>(null);
   const unit = Math.floor((width - PAD * 2 - GAP * 3) / 4);

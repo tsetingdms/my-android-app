@@ -138,6 +138,7 @@ declare class LauncherNativeModule extends NativeModule<LauncherEvents> {
   canDrawOverlays(): boolean;
   openHome(target: string): boolean;
   setPhoneWallpaper(spec: string): Promise<boolean>;
+  setShowSystemWallpaper(show: boolean): Promise<void>;
 }
 
 // Optional so the JS still loads (with empty data) outside a native Android build.
@@ -165,6 +166,10 @@ export const setTorch = (on: boolean) => native?.setTorch(on) ?? false;
 /** Cheap cached torch state (no full system-state read). */
 export const isTorchOn = (): boolean => (native?.isTorchOn ? native.isTorchOn() : false);
 export const getWallpaperColor = () => native?.getWallpaperColor() ?? null;
+/** Draw the phone's wallpaper behind the home screen (off while Lumo covers it with its own). */
+export function setShowSystemWallpaper(show: boolean) {
+  native?.setShowSystemWallpaper(show).catch(() => {});
+}
 /** Sets the phone's own wallpaper from a spec (see wallpaperSync.ts); resolves true when done. */
 export function setPhoneWallpaper(spec: string): Promise<boolean> {
   return native ? native.setPhoneWallpaper(spec).catch(() => false) : Promise.resolve(false);

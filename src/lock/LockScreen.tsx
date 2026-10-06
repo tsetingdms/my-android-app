@@ -52,13 +52,15 @@ function LockScreen() {
     return Launcher.addTorchListener(setTorch);
   }, []);
 
-  // Gentle "swipe up" nudge so it's obvious how to unlock.
+  // Gentle "swipe up" nudge so it's obvious how to unlock. Three times, then it rests: an endless
+  // animation would keep the screen redrawing (and the battery busy) the whole time the lock shows.
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(hint, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
         Animated.timing(hint, { toValue: 0, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-      ])
+      ]),
+      { iterations: 3 }
     );
     loop.start();
     return () => loop.stop();

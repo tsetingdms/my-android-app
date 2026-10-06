@@ -1,72 +1,128 @@
 import { useEffect, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, type NativeEventSubscription } from 'react-native';
 
 import * as Launcher from '../modules/launcher';
 import type { BatteryInfo, DeviceStats } from '../modules/launcher';
 
-/** Re-renders at the start of every minute (and when the launcher comes back to the front). */
-export function useMinuteClock(): Date {
+// One clock for the whole launcher: a single timer aligned to the minute (not one per widget), and
+// only while something on screen shows the time.
+let clockNow = new Date();
+const clockListeners = new Set<(now: Date) => void>();
+let clockTimer: ReturnType<typeof setTimeout> | null = null;
+let clockAppState: NativeEventSubscription | null = null;
+
+const sameMinute = (a: Date, b: Date) => Math.floor(a.getTime() / 60_000) === Math.floor(b.getTime() / 60_000);
+
+function clockTick() {
+  const now = new Date();
+  if (!sameMinute(now, clockNow)) {
+    clockNow = now;
+    clockListeners.forEach((listener) => listener(now));
+  }
+}
+
+function scheduleClock() {
+  if (clockTimer) clearTimeout(clockTimer);
+  clockTimer = setTimeout(() => {
+    clockTick();
+    scheduleClock();
+  }, 60_000 - (Date.now() % 60_000) + 50);
+}
+
+function subscribeClock(listener: (now: Date) => void) {
+  clockListeners.add(listener);
+  if (clockListeners.size === 1) {
+    clockTick();
+    scheduleClock();
+    // JS timers pause while Lumo is in the background; catch up as soon as it's back.
+    clockAppState = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      clockTick();
+      scheduleClock();
+    });
+  }
+  return () => {
+    clockListeners.delete(listener);
+    if (clockListeners.size > 0) return;
+    if (clockTimer) clearTimeout(clockTimer);
+    clockTimer = null;
+    clockAppState?.remove();
+    clockAppState = null;
+  };
+}
+
+/**
+ * The current time, updated at the start of every minute. Pass `active = false` while the
+ * component is hidden (closed panel, other home page): it then costs nothing and catches up when shown.
+ */
+export function useMinuteClock(active = true): Date {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval> | undefined;
-    const tick = () => setNow(new Date());
-    const timeout = setTimeout(() => {
-      tick();
-      interval = setInterval(tick, 60_000);
-    }, 60_000 - (Date.now() % 60_000) + 50);
-    const sub = AppState.addEventListener('change', (s) => s === 'active' && tick());
-    return () => {
-      clearTimeout(timeout);
-      if (interval) clearInterval(interval);
-      sub.remove();
-    };
-  }, []);
+    if (!active) return;
+    const fresh = new Date();
+    setNow((prev) => (sameMinute(prev, fresh) ? prev : fresh));
+    return subscribeClock(setNow);
+  }, [active]);
   return now;
 }
 
-/** Polls a cheap native reading while the launcher is visible. */
-function usePolled<T>(read: () => T | Promise<T>, initial: T, everyMs: number): T {
-  const [value, setValue] = useState<T>(initial);
-  useEffect(() => {
-    let alive = true;
-    let last = '';
-    const update = async () => {
-      try {
-        const v = await read();
-        // Skip the re-render when the reading hasn't changed (the common case).
-        const json = JSON.stringify(v);
-        if (alive && json !== last) {
-          last = json;
-          setValue(v);
-        }
-      } catch {
-        // Ignore transient failures.
+/**
+ * A native reading shared by every component that shows it: one poll for all of them, only while at
+ * least one is visible and Lumo is in front, and no re-render when the value didn't change.
+ */
+function sharedPoll<T>(read: () => T | Promise<T>, initial: T, everyMs: number) {
+  let value = initial;
+  let json = '';
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let appState: NativeEventSubscription | null = null;
+  const listeners = new Set<(value: T) => void>();
+
+  const update = async () => {
+    try {
+      const next = await read();
+      const nextJson = JSON.stringify(next);
+      if (nextJson === json) return;
+      json = nextJson;
+      value = next;
+      listeners.forEach((listener) => listener(next));
+    } catch {
+      // Ignore transient failures.
+    }
+  };
+
+  return function usePolledValue(active = true): T {
+    const [current, setCurrent] = useState<T>(value);
+    useEffect(() => {
+      if (!active) return;
+      setCurrent(value);
+      listeners.add(setCurrent);
+      if (listeners.size === 1) {
+        update();
+        timer = setInterval(() => {
+          if (AppState.currentState === 'active') update();
+        }, everyMs);
+        appState = AppState.addEventListener('change', (state) => state === 'active' && update());
       }
-    };
-    update();
-    const id = setInterval(() => {
-      if (AppState.currentState === 'active') update();
-    }, everyMs);
-    const sub = AppState.addEventListener('change', (s) => s === 'active' && update());
-    return () => {
-      alive = false;
-      clearInterval(id);
-      sub.remove();
-    };
-  }, [everyMs]);
-  return value;
+      return () => {
+        listeners.delete(setCurrent);
+        if (listeners.size > 0) return;
+        if (timer) clearInterval(timer);
+        timer = null;
+        appState?.remove();
+        appState = null;
+      };
+    }, [active]);
+    return current;
+  };
 }
 
 const NO_BATTERY: BatteryInfo = { level: -1, charging: false, temperature: 0 };
 
-export function useBattery(): BatteryInfo {
-  return usePolled(Launcher.getBattery, NO_BATTERY, 30_000);
-}
+/** Battery level / charging, polled every 30 s while shown. */
+export const useBattery = sharedPoll<BatteryInfo>(Launcher.getBattery, NO_BATTERY, 30_000);
 
-export function useDeviceStats(): DeviceStats | null {
-  return usePolled<DeviceStats | null>(Launcher.getDeviceStats, null, 15_000);
-}
-
+/** RAM and storage, polled every 15 s while shown (only the widgets page uses it). */
+export const useDeviceStats = sharedPoll<DeviceStats | null>(Launcher.getDeviceStats, null, 15_000);
 export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 export const MONTHS = [
   'January',

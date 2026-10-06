@@ -29,6 +29,7 @@ import android.provider.MediaStore
 import android.provider.Settings
 import android.view.View
 import android.view.ViewTreeObserver
+import android.view.WindowManager
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
@@ -54,6 +55,10 @@ class LauncherModule : Module() {
   }
   private val clipChangedListener = ClipboardManager.OnPrimaryClipChangedListener { captureClipboard() }
 
+  // Whether the phone's wallpaper is drawn behind the home screen. Off while Lumo paints its own
+  // picture or gradient over all of it: the system then stops drawing (and animating, for live
+  // wallpapers) something nobody can see.
+  private var showSystemWallpaper = true
   override fun definition() = ModuleDefinition {
     Name("Launcher")
 
@@ -71,6 +76,7 @@ class LauncherModule : Module() {
 
     OnActivityEntersForeground {
       watchClipboard()
+      applyWallpaperFlag()
     }
 
     OnDestroy {
@@ -327,6 +333,11 @@ class LauncherModule : Module() {
       deviceStats()
     }
 
+    AsyncFunction("setShowSystemWallpaper") { show: Boolean ->
+      showSystemWallpaper = show
+      applyWallpaperFlag()
+    }.runOnQueue(Queues.MAIN)
+
     // Optional: the phone's own wallpaper follows Lumo's (decoded, blurred and set off the main thread).
     AsyncFunction("setPhoneWallpaper") { spec: String ->
       PhoneWallpaper.apply(context, spec)
@@ -360,6 +371,16 @@ class LauncherModule : Module() {
         clipListening = false
       }
     }
+  }
+
+  /** Applies [showSystemWallpaper] to the home screen's window (never the lock screen or edge panel). */
+  private fun applyWallpaperFlag() {
+    val activity = appContext.currentActivity ?: return
+    if (activity is LockScreenActivity || activity is EdgeActivity) return
+    val window = activity.window ?: return
+    val has = (window.attributes.flags and WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER) != 0
+    if (showSystemWallpaper && !has) window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
+    if (!showSystemWallpaper && has) window.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
   }
 
   private fun detachClipFocusListener() {
